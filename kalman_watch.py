@@ -1,3 +1,5 @@
+#!/usr/bin/env python
+
 import os
 import argparse
 
@@ -9,7 +11,6 @@ import jinja2
 
 import matplotlib.pyplot as plt
 from Ska.Matplotlib import plot_cxctime
-# from kadi import events
 from Ska.engarchive import fetch
 from Chandra.Time import DateTime
 from pyyaks.logger import get_logger
@@ -40,15 +41,22 @@ opt = get_opt()
 stop = DateTime(opt.stop)
 start = DateTime(opt.start or stop - 3 * 365)
 
+# Get the AOKALSTR data with number of kalman stars reported by OBC
 logger.info('Getting AOKALSTR between {} and {}'.format(start.date, stop.date))
 dat = fetch.Msid('aokalstr', start, stop)
+
+# Find intervals of low kalman stars
 lowkals = dat.logical_intervals('<=', '1 ')
+
+# Very long intervals are spurious (need to understand this fully)
 lowkals = lowkals[lowkals['duration'] < 120]
 
+# Select long-duration events
 bad = lowkals['duration'] > 60
 dt_stop = (stop.secs - DateTime(lowkals['datestart']).secs) / 86400.
 recent_bad = bad & (dt_stop < 7)
 
+# Make the plot
 plt.figure(figsize=(6, 4))
 plot_cxctime(lowkals['tstart'], lowkals['duration'], '.b')
 if np.any(recent_bad):
@@ -65,6 +73,7 @@ outfile = os.path.join(opt.outdir, 'kalman_drop_intervals.png')
 logger.info('Saving plot to {}'.format(os.path.abspath(outfile)))
 plt.savefig(outfile)
 
+# Setup for the web report template rendering
 long_durs = lowkals[bad]
 long_durs = Table(long_durs)
 long_durs.add_column(Column(name='recent', data=dt_stop[bad] < 7))

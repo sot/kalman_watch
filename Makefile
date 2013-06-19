@@ -5,8 +5,8 @@ TASK = kalman_watch
 FLIGHT_ENV = SKA
 
 # Set the names of all files that get installed
-SHARE = kalman_watch.py
-DATA = task_schedule.cfg index_template.html
+SHARE = kalman_watch.py index_template.html
+DATA = task_schedule.cfg
 
 include /proj/sot/ska/include/Makefile.FLIGHT
 
