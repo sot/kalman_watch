@@ -1,0 +1,53 @@
+<!DOCTYPE HTML PUBLIC "-//IETF//DTD HTML//EN">
+<html>
+  <head>
+    <title>Kalman star watch</title>
+    <link href="http://cxc.harvard.edu/mta/ASPECT/aspect.css" rel="stylesheet"
+    type="text/css" media="all" />
+    <style type="text/css">
+      tr.pink-bkg {
+        background-color:#f88
+      }
+    </style>
+  </head>
+
+  <body>
+    <!--#include virtual="http://cxc.harvard.edu/mta/ASPECT/header.html"-->
+
+    <h2> Kalman star watch </h2>
+
+    <h3> Summary </h3>
+
+    <p>
+      The image below shows intervals where the number of Kalman stars reported by the OBC
+      (AOKALSTR) was zero or one for at least one update.  Intervals of greater than 60
+      seconds in length which occurred in the last 7 days are shown in red in the plot and
+      table below.
+    </p>
+
+    <h3>Kalman drop intervals (updated <!--#CONFIG TIMEFMT="%x"--><!--#flastmod file="kalman_drop_intervals.png"-->)</h3>
+
+    <img SRC="kalman_drop_intervals.png"><br/>
+
+    <h4>Intervals longer than 60 seconds</h4>
+
+    <table class="white-double-lines">
+     <tr> <th> Date </th> <th> Duration </th> <th> Obsid </th> </tr>
+     {% for long_dur in long_durs %}
+       <tr {{long_dur['tr_class']}}>
+         <td> {{long_dur['datestart']}} </td> <td> {{long_dur['duration']}} </td> <td> {{long_dur['obsid']}} </td>
+       </tr>
+     {% endfor %}
+    </table>
+
+    <h3> Analysis data </h3>
+      The scripts and data used in this analysis are in
+      <a href="https://github.com/sot/kalman_stars">https://github.com/sot/kalman_stars</a>.
+
+      <br></br>
+
+<!--#include virtual="http://cxc.harvard.edu/mta/ASPECT/footer.html"-->
+<!--footer end-->
+
+  </body>
+</html>
