@@ -16,12 +16,13 @@ from Chandra.Time import DateTime
 from pyyaks.logger import get_logger
 
 
+VERSION = '0.2'
 FILE_DIR = os.path.dirname(os.path.abspath(__file__))
 logger = get_logger()
 
 
 def get_opt():
-    parser = argparse.ArgumentParser(description='Kalman star watch')
+    parser = argparse.ArgumentParser(description='Kalman star watch {}'.format(VERSION))
     parser.add_argument('--start',
                         type=str,
                         help='Start date')
@@ -32,6 +33,10 @@ def get_opt():
                         type=str,
                         default='.',
                         help='Output directory')
+    parser.add_argument('--long-duration',
+                        type=float,
+                        default=30.0,
+                        help='Threshold for long duration drop intervals (default=30 sec)')
     args = parser.parse_args()
     return args
 
@@ -52,9 +57,20 @@ lowkals = dat.logical_intervals('<=', '1 ')
 lowkals = lowkals[lowkals['duration'] < 120]
 
 # Select long-duration events
-bad = lowkals['duration'] > 60
+bad = lowkals['duration'] > opt.long_duration
 dt_stop = (stop.secs - DateTime(lowkals['datestart']).secs) / 86400.
 recent_bad = bad & (dt_stop < 7)
+
+# Store any new long duration events to a persistent shelf database
+import shelve
+bad_db = shelve.open(os.path.join(opt.outdir, 'long_dur_events.shelve'))
+for long_dur in lowkals[bad]:
+    datestart = long_dur['datestart']
+    if datestart not in bad_db:
+        logger.warn('WARNING: Fewer than two kalman stars at {} for {:.1f} secs'
+                    .format(datestart, long_dur['duration']))
+        bad_db[datestart] = long_dur['duration']
+bad_db.close()
 
 # Make the plot
 plt.figure(figsize=(6, 4))
@@ -91,6 +107,6 @@ long_durs['duration'] = np.round(long_durs['duration'], 1)
 
 index_template_html = open(os.path.join(FILE_DIR, 'index_template.html'), 'r').read()
 template = jinja2.Template(index_template_html)
-out_html = template.render(long_durs=long_durs[::-1])
+out_html = template.render(long_durs=long_durs[::-1], long_dur_limit=opt.long_duration)
 with open(os.path.join(opt.outdir, 'index.html'), 'w') as fh:
     fh.write(out_html)
