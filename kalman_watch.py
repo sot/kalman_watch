@@ -35,8 +35,8 @@ def get_opt():
                         help='Output directory')
     parser.add_argument('--long-duration',
                         type=float,
-                        default=30.0,
-                        help='Threshold for long duration drop intervals (default=30 sec)')
+                        default=60.0,
+                        help='Threshold for long duration drop intervals (default=60 sec)')
     args = parser.parse_args()
     return args
 
@@ -49,7 +49,9 @@ start = DateTime(opt.start or stop - 3 * 365)
 # Get the AOKALSTR data with number of kalman stars reported by OBC
 logger.info('Getting AOKALSTR between {} and {}'.format(start.date, stop.date))
 dat = fetch.Msid('aokalstr', start, stop)
+last_date = DateTime(dat.times[-1]).date
 
+logger.info('Finding intervals of low kalman stars')
 # Find intervals of low kalman stars
 lowkals = dat.logical_intervals('<=', '1 ')
 
@@ -62,8 +64,10 @@ dt_stop = (stop.secs - DateTime(lowkals['datestart']).secs) / 86400.
 recent_bad = bad & (dt_stop < 7)
 
 # Store any new long duration events to a persistent shelf database
+events_file = os.path.join(opt.outdir, 'long_dur_events.shelve')
+logger.info('Storing new events to {}'.format(events_file))
 import shelve
-bad_db = shelve.open(os.path.join(opt.outdir, 'long_dur_events.shelve'))
+bad_db = shelve.open(events_file)
 for long_dur in lowkals[bad]:
     datestart = long_dur['datestart']
     if datestart not in bad_db:
@@ -107,6 +111,7 @@ long_durs['duration'] = np.round(long_durs['duration'], 1)
 
 index_template_html = open(os.path.join(FILE_DIR, 'index_template.html'), 'r').read()
 template = jinja2.Template(index_template_html)
-out_html = template.render(long_durs=long_durs[::-1], long_dur_limit=opt.long_duration)
+out_html = template.render(long_durs=long_durs[::-1], long_dur_limit=opt.long_duration,
+                           last_date=last_date)
 with open(os.path.join(opt.outdir, 'index.html'), 'w') as fh:
     fh.write(out_html)
