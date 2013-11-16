@@ -32,10 +32,13 @@
     <h4>Intervals longer than {{long_dur_limit}} seconds</h4>
 
     <table class="white-double-lines">
-     <tr> <th> Date </th> <th> Duration </th> <th> Obsid </th> </tr>
+     <tr> <th> Date </th> <th> Duration </th> <th> Obsid </th> <th> Comment </th> </tr>
      {% for long_dur in long_durs %}
        <tr {{long_dur['tr_class']}}>
-         <td> {{long_dur['datestart']}} </td> <td> {{long_dur['duration']}} </td> <td> {{long_dur['obsid']}} </td>
+         <td> {{long_dur['datestart']}} </td>
+         <td> {{long_dur['duration']}} </td>
+         <td> {{long_dur['obsid']}} </td>
+         <td> {{long_dur['comment']}} </td>
        </tr>
      {% endfor %}
     </table>

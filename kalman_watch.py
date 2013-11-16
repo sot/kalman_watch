@@ -7,6 +7,7 @@ import numpy as np
 import matplotlib
 matplotlib.use('agg')
 from astropy.table import Table, Column
+from astropy.io import ascii
 import jinja2
 
 import matplotlib.pyplot as plt
@@ -103,6 +104,16 @@ long_durs = lowkals[bad]
 long_durs = Table(long_durs)
 long_durs.add_column(Column(name='recent', data=dt_stop[bad] < 7))
 
+# Add comment column
+# First read comments file and re-form as a dict
+comments_file = os.path.join(opt.outdir, 'comments.dat')
+if os.path.exists(comments_file):
+    comments = ascii.read(comments_file, Reader=ascii.FixedWidthTwoLine)
+    # convert to a dict
+    comments = {comment['obsid']: comment['comment'] for comment in comments}
+else:
+    comments = {}
+
 obsids = []
 tr_classes = []
 for long_dur in long_durs:
@@ -113,6 +124,10 @@ for long_dur in long_durs:
 long_durs.add_column(Column(name='tr_class', data=tr_classes))
 long_durs.add_column(Column(name='obsid', data=obsids, dtype=int))
 long_durs['duration'] = np.round(long_durs['duration'], 1)
+
+# Now make a Column object and add to the long_durs table
+comments_col = Column(data=[comments.get(row['obsid'], '') for row in long_durs], name='comment')
+long_durs.add_column(comments_col)
 
 index_template_html = open(os.path.join(FILE_DIR, 'index_template.html'), 'r').read()
 template = jinja2.Template(index_template_html)
