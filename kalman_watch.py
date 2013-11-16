@@ -89,6 +89,11 @@ plt.grid()
 plt.ylabel('Duration (seconds)')
 plt.title('Duration of contiguous n_kalman <= 1')
 
+# Plot a line for the time of the OBC patch to ignore the defective pixel flag.
+t_dp = DateTime('2013-10-24T12:00:00').secs
+if t_dp > start.secs:
+    plot_cxctime([t_dp, t_dp], [-5, 100], '--r', alpha=0.4)
+
 outfile = os.path.join(opt.outdir, 'kalman_drop_intervals.png')
 logger.info('Saving plot to {}'.format(os.path.abspath(outfile)))
 plt.savefig(outfile)
