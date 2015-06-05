@@ -74,7 +74,7 @@ for long_dur in lowkals[bad]:
     if datestart not in bad_db:
         logger.warn('WARNING: Fewer than two kalman stars at {} for {:.1f} secs'
                     .format(datestart, long_dur['duration']))
-        bad_db[datestart] = long_dur['duration']
+        bad_db[str(datestart)] = long_dur['duration']
 bad_db.close()
 
 # Make the plot
