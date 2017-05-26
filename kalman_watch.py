@@ -13,6 +13,7 @@ import jinja2
 import matplotlib.pyplot as plt
 from Ska.Matplotlib import plot_cxctime
 from Ska.engarchive import fetch
+from Ska.engarchive.utils import logical_intervals
 from Chandra.Time import DateTime
 from pyyaks.logger import get_logger
 
@@ -49,15 +50,15 @@ start = DateTime(opt.start or stop - 3 * 365)
 
 # Get the AOKALSTR data with number of kalman stars reported by OBC
 logger.info('Getting AOKALSTR between {} and {}'.format(start.date, stop.date))
-dat = fetch.Msid('aokalstr', start, stop)
-last_date = DateTime(dat.times[-1]).date
+dat = fetch.Msidset(['aokalstr', 'aoacaseq'], start, stop)
+dat.interpolate(1.025)
+last_date = DateTime(dat['aokalstr'].times[-1]).date
 
 logger.info('Finding intervals of low kalman stars')
 # Find intervals of low kalman stars
-lowkals = dat.logical_intervals('<=', '1 ')
-
-# Very long intervals are spurious (need to understand this fully)
-lowkals = lowkals[lowkals['duration'] < 120]
+lowkals = logical_intervals(dat['aokalstr'].times,
+                            (dat['aokalstr'].vals.astype(int) <= 1) & (dat['aoacaseq'].vals == 'KALM'),
+                            max_gap=10.0)
 
 # Select long-duration events
 bad = lowkals['duration'] > opt.long_duration
