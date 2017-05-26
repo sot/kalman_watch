@@ -85,7 +85,7 @@ if np.any(recent_bad):
 x0, x1 = plt.xlim()
 dx = (x1 - x0) * 0.05
 plt.xlim(x0 - dx, x1 + dx)
-plt.ylim(-5, 100)
+plt.ylim(-5, 130)
 plt.grid()
 plt.ylabel('Duration (seconds)')
 plt.title('Duration of contiguous n_kalman <= 1')
