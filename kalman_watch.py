@@ -50,16 +50,17 @@ start = DateTime(opt.start or stop - 3 * 365)
 
 # Get the AOKALSTR data with number of kalman stars reported by OBC
 logger.info('Getting AOKALSTR between {} and {}'.format(start.date, stop.date))
-dat = fetch.Msidset(['aokalstr', 'aoacaseq'], start, stop)
+dat = fetch.Msidset(['aokalstr', 'aoacaseq', 'aopcadmd'], start, stop)
 dat.interpolate(1.025)
 last_date = DateTime(dat['aokalstr'].times[-1]).date
 
 logger.info('Finding intervals of low kalman stars')
 # Find intervals of low kalman stars
 lowkals = logical_intervals(dat['aokalstr'].times,
-                            (dat['aokalstr'].vals.astype(int) <= 1) & (dat['aoacaseq'].vals == 'KALM'),
+                            (dat['aokalstr'].vals.astype(int) <= 1)
+                            & (dat['aoacaseq'].vals == 'KALM')
+                            & (dat['aopcadmd'].vals == 'NPNT'),
                             max_gap=10.0)
-
 # Select long-duration events
 bad = lowkals['duration'] > opt.long_duration
 dt_stop = (stop.secs - DateTime(lowkals['datestart']).secs) / 86400.
