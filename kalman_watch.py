@@ -37,8 +37,8 @@ def get_opt():
                         help='Output directory')
     parser.add_argument('--long-duration',
                         type=float,
-                        default=20.0,
-                        help='Threshold for long duration drop intervals (default=20 sec)')
+                        default=27.0,
+                        help='Threshold for long duration drop intervals (default=27 sec)')
     args = parser.parse_args()
     return args
 
