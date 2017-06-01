@@ -46,7 +46,10 @@ def get_opt():
 opt = get_opt()
 
 stop = DateTime(opt.stop)
-start = DateTime(opt.start or stop - 3 * 365)
+
+# Default start is beginning of calendar year 3 years ago
+start = DateTime(opt.start or DateTime(int(DateTime().frac_year - 3), format='frac_year').date)
+
 
 # Get the AOKALSTR data with number of kalman stars reported by OBC
 logger.info('Getting AOKALSTR between {} and {}'.format(start.date, stop.date))
