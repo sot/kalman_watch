@@ -18,7 +18,7 @@ from Chandra.Time import DateTime
 from pyyaks.logger import get_logger
 
 
-VERSION = '0.2'
+VERSION = '0.3'
 FILE_DIR = os.path.dirname(os.path.abspath(__file__))
 logger = get_logger()
 
