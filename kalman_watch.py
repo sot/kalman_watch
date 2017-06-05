@@ -13,6 +13,7 @@ import jinja2
 import matplotlib.pyplot as plt
 from Ska.Matplotlib import plot_cxctime
 from Ska.engarchive import fetch
+from Ska.engarchive.utils import logical_intervals
 from Chandra.Time import DateTime
 from pyyaks.logger import get_logger
 
@@ -36,8 +37,8 @@ def get_opt():
                         help='Output directory')
     parser.add_argument('--long-duration',
                         type=float,
-                        default=60.0,
-                        help='Threshold for long duration drop intervals (default=60 sec)')
+                        default=27.0,
+                        help='Threshold for long duration drop intervals (default=27 sec)')
     args = parser.parse_args()
     return args
 
@@ -45,20 +46,24 @@ def get_opt():
 opt = get_opt()
 
 stop = DateTime(opt.stop)
-start = DateTime(opt.start or stop - 3 * 365)
+
+# Default start is beginning of calendar year 3 years ago
+start = DateTime(opt.start or DateTime(int(DateTime().frac_year - 3), format='frac_year').date)
+
 
 # Get the AOKALSTR data with number of kalman stars reported by OBC
 logger.info('Getting AOKALSTR between {} and {}'.format(start.date, stop.date))
-dat = fetch.Msid('aokalstr', start, stop)
-last_date = DateTime(dat.times[-1]).date
+dat = fetch.Msidset(['aokalstr', 'aoacaseq', 'aopcadmd'], start, stop)
+dat.interpolate(1.025)
+last_date = DateTime(dat['aokalstr'].times[-1]).date
 
 logger.info('Finding intervals of low kalman stars')
 # Find intervals of low kalman stars
-lowkals = dat.logical_intervals('<=', '1 ')
-
-# Very long intervals are spurious (need to understand this fully)
-lowkals = lowkals[lowkals['duration'] < 120]
-
+lowkals = logical_intervals(dat['aokalstr'].times,
+                            (dat['aokalstr'].vals.astype(int) <= 1)
+                            & (dat['aoacaseq'].vals == 'KALM')
+                            & (dat['aopcadmd'].vals == 'NPNT'),
+                            max_gap=10.0)
 # Select long-duration events
 bad = lowkals['duration'] > opt.long_duration
 dt_stop = (stop.secs - DateTime(lowkals['datestart']).secs) / 86400.
@@ -85,7 +90,7 @@ if np.any(recent_bad):
 x0, x1 = plt.xlim()
 dx = (x1 - x0) * 0.05
 plt.xlim(x0 - dx, x1 + dx)
-plt.ylim(-5, 100)
+plt.ylim(-5, 40)
 plt.grid()
 plt.ylabel('Duration (seconds)')
 plt.title('Duration of contiguous n_kalman <= 1')
