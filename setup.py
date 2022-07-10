@@ -8,20 +8,18 @@ except ImportError:
 
 entry_points = {
     "console_scripts": [
-        "fid_drift_mon_update_fid_stats = fid_drift_mon.update_fid_stats:main",
-        "fid_drift_mon_plot_drift = fid_drift_mon.plot_drift:main",
-        "fid_drift_mon_plot_drift_model = fid_drift_mon.plot_drift_model:main",
-        "fid_drift_mon_plot_starcheck_vs_telem = fid_drift_mon.plot_starcheck_vs_telem:main",
+        "kalman_watch_reacqs = kalman_watch.reacqs:main",
+        "kalman_watch_perigee = kalman_watch.perigee:main",
     ]
 }
 
 setup(
-    name="fid_drift_mon",
-    description="Fid light drift monitor",
+    name="kalman_watch",
+    description="Kalman stars monitor",
     author="Tom Aldcroft",
     author_email="taldcroft@cfa.harvard.edu",
-    url="https://sot.github.io/fid_drift_mon",
-    packages=["fid_drift_mon"],
+    url="https://sot.github.io/kalman_watch",
+    packages=["kalman_watch"],
     tests_require=["pytest"],
     use_scm_version=True,
     setup_requires=["setuptools_scm", "setuptools_scm_git_archive"],
