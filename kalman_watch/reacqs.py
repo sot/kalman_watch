@@ -1,35 +1,44 @@
 #!/usr/bin/env python
 
+"""Process telemetry and find intervals of low Kalman stars.
+
+- Intervals are stored in <data_dir>/low_kalman_events.ecsv.
+- Web dashboard is stored in <data_dir>/index_lowkals.html.
+"""
+
 import argparse
-import os
 from pathlib import Path
 
-import matplotlib
-import numpy as np
-
-matplotlib.use("agg")
 import astropy.units as u
 import jinja2
-import matplotlib.pyplot as plt
+import numpy as np
 import plotly.graph_objects as pgo
-from astropy.io import ascii
-from astropy.table import Column, Table, vstack
+from astropy.table import Table, vstack
 from cxotime import CxoTime
-from pyyaks.logger import get_logger
 from Ska.engarchive import fetch
 from Ska.engarchive.utils import logical_intervals
-from Ska.Matplotlib import plot_cxctime
+from ska_helpers.logging import basic_logger
 
 from . import __version__
 
 FILE_DIR = Path(__file__).parent
 
 
-def LOWKALS_PATH(data_dir: str) -> Path:
+def LOWKALS_DATA_PATH(data_dir: str) -> Path:
     return Path(data_dir) / "low_kalman_events.ecsv"
 
 
-logger = get_logger()
+def LOWKALS_HTML_PATH(data_dir: str) -> Path:
+    return Path(data_dir) / "low_kalman_events.html"
+
+
+LOWKALS_EMPTY = Table(
+    names=["datestart", "duration", "obsid", "comment"],
+    dtype=["S21", "float", "int", "S40"],
+)
+
+
+logger = basic_logger(__name__, level="INFO")
 
 
 def get_opt(sys_args):
@@ -41,20 +50,26 @@ def get_opt(sys_args):
         "--lookback",
         type=float,
         default=14,
-        help="Lookback time from stop (days, default=14)",
+        help="Lookback days from stop for processing (days, default=14)",
     )
     parser.add_argument("--data-dir", type=str, default=".", help="Data directory")
     parser.add_argument(
         "--long-duration",
         type=float,
         default=27.0,
-        help="Threshold for long duration drop intervals (default=27.0 sec)",
+        help="Threshold for long duration drop intervals (secs, default=27.0)",
     )
     parser.add_argument(
         "--min-duration",
         type=float,
         default=4.0,
-        help="Threshold for plotting drop intervals (default=4.0 sec)",
+        help="Threshold for writing/plotting drop intervals (secs, default=4.0 sec)",
+    )
+    parser.add_argument(
+        "--highlight-recent-days",
+        type=float,
+        default=30.0,
+        help="Number of days to highlight in plots and table (days, default=30)",
     )
     args = parser.parse_args(sys_args)
     return args
@@ -63,47 +78,48 @@ def get_opt(sys_args):
 def main(sys_args=None):
     opt = get_opt(sys_args)
 
-    lowkals_path = LOWKALS_PATH(opt.data_dir)
+    lowkals_path = LOWKALS_DATA_PATH(opt.data_dir)
     lowkals_prev = get_lowkals_prev(lowkals_path)
 
     # Start lookback days from stop, except don't start before the last telemetry
     stop = CxoTime(opt.stop)
-    start = stop - opt.lookback * u.day
+    start = stop - opt.lookback * u.day  # type: CxoTime
     date_telem_last = CxoTime(lowkals_prev.meta.pop("date_telem_last", "1999:001"))
     if start < date_telem_last:
         start = date_telem_last
 
-    lowkals_new = get_lowkals_new(opt.min_duration, opt.long_duration, start, stop)
+    lowkals_new = get_lowkals_new(opt, start, stop)
     if len(lowkals_new) > 0:
-        logger.info(f"Storing new events to {lowkals_path}")
-        lowkals = vstack([lowkals_new, lowkals_prev])
+        lowkals = vstack([lowkals_new, lowkals_prev])  # type: Table
         lowkals.sort("datestart", reverse=True)
-        lowkals.write(lowkals_path, format="ascii.ecsv", overwrite=True)
     else:
         lowkals = lowkals_prev
+        lowkals.meta["date_telem_last"] = date_telem_last.date
+    logger.info(f"Updating events file {lowkals_path}")
+    lowkals.write(lowkals_path, format="ascii.ecsv", overwrite=True)
 
     make_web_page(opt, lowkals)
 
 
 def get_lowkals_prev(lowkals_path: Path) -> Table:
-    # Get the existing low kalman events or make a new one
+    """Get the existing low kalman events or make a new one"""
     if lowkals_path.exists():
         lowkals_prev = Table.read(lowkals_path)
     else:
-        lowkals_prev = Table(
-            names=["datestart", "duration", "obsid", "comment"],
-            dtype=["S21", "float", "int", "S40"],
-        )
+        lowkals_prev = LOWKALS_EMPTY.copy()
     return lowkals_prev
 
 
-def get_lowkals_new(
-    min_duration: float, long_duration: float, start: CxoTime, stop: CxoTime
-) -> Table:
-    # Get the AOKALSTR data with number of kalman stars reported by OBC
+def get_lowkals_new(opt, start: CxoTime, stop: CxoTime) -> Table:
+    """Get low Kalman events from telemetry"""
+    # Get the AOKALSTR data with number of kalman stars reported by OBC.
     logger.info(f"Getting AOKALSTR between {start} and {stop}")
     dat = fetch.Msidset(["aokalstr", "aoacaseq", "aopcadmd", "cobsrqid"], start, stop)
     dat.interpolate(1.025)
+
+    if len(dat.times) < 300:
+        logger.warning(f"Not enough data to find low Kalman intervals")
+        return LOWKALS_EMPTY.copy()
 
     logger.info("Finding intervals of low kalman stars")
     # Find intervals of low kalman stars
@@ -115,9 +131,10 @@ def get_lowkals_new(
         max_gap=10.0,
     )
 
-    # Select events with minimum duration (not necessarily "long")
-    lowkals = lowkals[lowkals["duration"] > min_duration]
+    # Select events with minimum duration (4 seconds by default)
+    lowkals = lowkals[lowkals["duration"] > opt.min_duration]
 
+    # Find the obsid and add an empty comment column
     ii = np.searchsorted(dat["cobsrqid"].times, lowkals["tstart"])
     lowkals["obsid"] = dat["cobsrqid"].vals[ii].astype(int)
     lowkals["comment"] = np.full(len(lowkals), "")
@@ -128,7 +145,7 @@ def get_lowkals_new(
     del lowkals["tstop"]
 
     # Warn in processing for long duration drop intervals
-    long_mask = lowkals["duration"] > long_duration
+    long_mask = lowkals["duration"] > opt.long_duration
     for lowkal in lowkals[long_mask]:
         logger.warn(
             f"WARNING: Fewer than two kalman stars at {lowkal['datestart']} "
@@ -136,10 +153,13 @@ def get_lowkals_new(
         )
 
     lowkals.meta["date_telem_last"] = CxoTime(dat["aokalstr"].times[-1]).date
+    if (n_lowkals := len(lowkals)) > 0:
+        logger.info(f"Found {n_lowkals} new low kalman events")
+
     return lowkals
 
 
-def get_plot_html(lowkals: Table) -> str:
+def get_plot_html(opt, lowkals: Table) -> str:
     dates = CxoTime(lowkals["datestart"])
     times = dates.datetime64
     text_obsids = np.array(
@@ -154,7 +174,7 @@ def get_plot_html(lowkals: Table) -> str:
     }
 
     fig = pgo.Figure(layout=layout)
-    recent = dates > CxoTime.now() - 30 * u.day
+    recent = dates > CxoTime.now() - opt.highlight_recent_days * u.day
     for color, mask in [
         ("#1f77b4", ~recent),  # muted blue
         ("#ff7f0e", recent),  # safety orange
@@ -174,14 +194,20 @@ def get_plot_html(lowkals: Table) -> str:
     fig.update_layout(
         {
             "xaxis_autorange": False,
-            "xaxis_range": [
-                (CxoTime.now() - 5 * 365 * u.day).datetime,
-                CxoTime.now().datetime,
-            ],
+            "title": f"Duration of contiguous n_kalman <= 1 (autoscale for full mission)",
+            "yaxis": {"title": "Duration (sec)", "autorange": False, "range": [0, 35]},
+            "xaxis": {
+                "title": f"Date",
+                "range": [
+                    (CxoTime.now() - 5 * 365 * u.day).datetime,
+                    CxoTime.now().datetime,
+                ],
+                "autorange": False,
+            },
         }
     )
     html = fig.to_html(
-        full_html=False, include_plotlyjs="cdn", default_width=1000, default_height=600,
+        full_html=False, include_plotlyjs="cdn", default_width=800, default_height=500,
     )
     return html
 
@@ -195,7 +221,7 @@ def make_web_page(opt, lowkals: Table) -> None:
 
     tr_classes = []
     for lowkal in long_durs:
-        recent = CxoTime.now() - CxoTime(lowkal["datestart"]) < 30 * u.day
+        recent = CxoTime.now() - CxoTime(lowkal["datestart"]) < 300 * u.day
         tr_class = 'class="pink-bkg"' if recent else ""
         tr_classes.append(tr_class)
     long_durs["tr_class"] = tr_classes
@@ -203,12 +229,12 @@ def make_web_page(opt, lowkals: Table) -> None:
     index_template_html = (FILE_DIR / "index_reacqs_template.html").read_text()
     template = jinja2.Template(index_template_html)
     out_html = template.render(
-        long_durs=long_durs[::-1],
+        long_durs=long_durs,
         long_dur_limit=opt.long_duration,
         last_date=lowkals.meta["date_telem_last"][:-4],
-        plot_html=get_plot_html(lowkals),
+        plot_html=get_plot_html(opt, lowkals),
     )
-    (Path(opt.data_dir) / "index.html").write_text(out_html)
+    LOWKALS_HTML_PATH(opt.data_dir).write_text(out_html)
 
 
 if __name__ == "__main__":

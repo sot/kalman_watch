@@ -16,7 +16,6 @@
             border-style: outset;
             border-color: gray;
             border-collapse: separate;
-            background-color: white;
         }
 
         table th,
@@ -25,8 +24,6 @@
             padding: 1px 5px 1px 5px;
             border-style: solid;
             border-color: gray;
-            background-color: white;
-            -moz-border-radius: ;
         }
     </style>
 </head>
@@ -47,7 +44,7 @@
 
     <h3>Kalman drop intervals (valid through {{last_date}})</h3>
 
-    {{kalman_plot_html}}
+    {{plot_html}}
 
     <h4>Intervals in last 5 years longer than {{long_dur_limit}} seconds</h4>
 
