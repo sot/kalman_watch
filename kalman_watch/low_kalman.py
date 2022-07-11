@@ -29,7 +29,11 @@ def LOWKALS_DATA_PATH(data_dir: str) -> Path:
 
 
 def LOWKALS_HTML_PATH(data_dir: str) -> Path:
-    return Path(data_dir) / "low_kalman_events.html"
+    return Path(data_dir) / "index.html"
+
+
+def INDEX_TEMPLATE_PATH():
+    return FILE_DIR / "index_low_kalman_template.html"
 
 
 LOWKALS_EMPTY = Table(
@@ -88,13 +92,9 @@ def main(sys_args=None):
     if start < date_telem_last:
         start = date_telem_last
 
-    lowkals_new = get_lowkals_new(opt, start, stop)
-    if len(lowkals_new) > 0:
-        lowkals = vstack([lowkals_new, lowkals_prev])  # type: Table
-        lowkals.sort("datestart", reverse=True)
-    else:
-        lowkals = lowkals_prev
-        lowkals.meta["date_telem_last"] = date_telem_last.date
+    lowkals_new = get_lowkals_new(opt, start, stop, date_telem_last)
+    lowkals = vstack([lowkals_new, lowkals_prev])  # type: Table
+    lowkals.sort("datestart", reverse=True)
     logger.info(f"Updating events file {lowkals_path}")
     lowkals.write(lowkals_path, format="ascii.ecsv", overwrite=True)
 
@@ -110,16 +110,23 @@ def get_lowkals_prev(lowkals_path: Path) -> Table:
     return lowkals_prev
 
 
-def get_lowkals_new(opt, start: CxoTime, stop: CxoTime) -> Table:
+def get_lowkals_new(
+    opt, start: CxoTime, stop: CxoTime, date_telem_last: CxoTime
+) -> Table:
     """Get low Kalman events from telemetry"""
     # Get the AOKALSTR data with number of kalman stars reported by OBC.
-    logger.info(f"Getting AOKALSTR between {start} and {stop}")
-    dat = fetch.Msidset(["aokalstr", "aoacaseq", "aopcadmd", "cobsrqid"], start, stop)
+    logger.info(f"Getting telemetry between {start} and {stop}")
+    with fetch.data_source("cxc", "maude allow_subset=False"):
+        dat = fetch.Msidset(
+            ["aokalstr", "aoacaseq", "aopcadmd", "cobsrqid"], start, stop
+        )
     dat.interpolate(1.025)
 
     if len(dat.times) < 300:
-        logger.warning(f"Not enough data to find low Kalman intervals")
-        return LOWKALS_EMPTY.copy()
+        logger.warning(f"WARNING: Not enough data to find low Kalman intervals")
+        lowkals = LOWKALS_EMPTY.copy()
+        lowkals.meta["date_telem_last"] = date_telem_last.date
+        return lowkals
 
     logger.info("Finding intervals of low kalman stars")
     # Find intervals of low kalman stars
@@ -152,7 +159,9 @@ def get_lowkals_new(opt, start: CxoTime, stop: CxoTime) -> Table:
             f"for {lowkal['duration']:.1f} secs"
         )
 
-    lowkals.meta["date_telem_last"] = CxoTime(dat["aokalstr"].times[-1]).date
+    date_telem_last = CxoTime(dat["aokalstr"].times[-1]).date
+    logger.info(f"Last telemetry date: {date_telem_last}")
+    lowkals.meta["date_telem_last"] = date_telem_last
     if (n_lowkals := len(lowkals)) > 0:
         logger.info(f"Found {n_lowkals} new low kalman events")
 
@@ -221,12 +230,15 @@ def make_web_page(opt, lowkals: Table) -> None:
 
     tr_classes = []
     for lowkal in long_durs:
-        recent = CxoTime.now() - CxoTime(lowkal["datestart"]) < 300 * u.day
+        recent = (
+            CxoTime.now() - CxoTime(lowkal["datestart"])
+            < opt.highlight_recent_days * u.day
+        )
         tr_class = 'class="pink-bkg"' if recent else ""
         tr_classes.append(tr_class)
     long_durs["tr_class"] = tr_classes
 
-    index_template_html = (FILE_DIR / "index_reacqs_template.html").read_text()
+    index_template_html = INDEX_TEMPLATE_PATH().read_text()
     template = jinja2.Template(index_template_html)
     out_html = template.render(
         long_durs=long_durs,
@@ -234,7 +246,9 @@ def make_web_page(opt, lowkals: Table) -> None:
         last_date=lowkals.meta["date_telem_last"][:-4],
         plot_html=get_plot_html(opt, lowkals),
     )
-    LOWKALS_HTML_PATH(opt.data_dir).write_text(out_html)
+    lowkals_html_path = LOWKALS_HTML_PATH(opt.data_dir)
+    logger.info(f"Writing HTML to {lowkals_html_path}")
+    lowkals_html_path.write_text(out_html)
 
 
 if __name__ == "__main__":
