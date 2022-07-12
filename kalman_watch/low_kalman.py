@@ -1,5 +1,3 @@
-#!/usr/bin/env python
-
 """Process telemetry and find intervals of low Kalman stars.
 
 - Intervals are stored in <data_dir>/low_kalman_events.ecsv.
@@ -21,6 +19,7 @@ from ska_helpers.logging import basic_logger
 
 from . import __version__
 
+# Constants and file path definitions
 FILE_DIR = Path(__file__).parent
 
 
@@ -116,6 +115,9 @@ def get_lowkals_new(
     """Get low Kalman events from telemetry"""
     # Get the AOKALSTR data with number of kalman stars reported by OBC.
     logger.info(f"Getting telemetry between {start} and {stop}")
+
+    # WARNING: this is a trap I fell into! This needs fixing. Grabbing data
+    # from MAUDE like this might result in data gaps during comm.
     with fetch.data_source("cxc", "maude allow_subset=False"):
         dat = fetch.Msidset(
             ["aokalstr", "aoacaseq", "aopcadmd", "cobsrqid"], start, stop
@@ -159,6 +161,7 @@ def get_lowkals_new(
             f"for {lowkal['duration']:.1f} secs"
         )
 
+    # Provide log information and store last telemetry date in table meta.
     date_telem_last = CxoTime(dat["aokalstr"].times[-1]).date
     logger.info(f"Last telemetry date: {date_telem_last}")
     lowkals.meta["date_telem_last"] = date_telem_last
@@ -168,21 +171,14 @@ def get_lowkals_new(
     return lowkals
 
 
-def get_plot_html(opt, lowkals: Table) -> str:
+def get_plot_html(opt, lowkals: Table, show=False) -> str:
     dates = CxoTime(lowkals["datestart"])
     times = dates.datetime64
     text_obsids = np.array(
         [f"{lowkal['datestart'][:-4]} ObsID {lowkal['obsid']}" for lowkal in lowkals]
     )
 
-    layout = {
-        "title": f"Duration of contiguous n_kalman <= 1",
-        "yaxis": {"title": "Duration (sec)"},
-        "xaxis": {"title": f"Date"},
-        "yaxis_range": [0, 35],
-    }
-
-    fig = pgo.Figure(layout=layout)
+    fig = pgo.Figure()
     recent = dates > CxoTime.now() - opt.highlight_recent_days * u.day
     for color, mask in [
         ("#1f77b4", ~recent),  # muted blue
@@ -215,6 +211,9 @@ def get_plot_html(opt, lowkals: Table) -> str:
             },
         }
     )
+    if show:
+        fig.show()
+
     html = fig.to_html(
         full_html=False, include_plotlyjs="cdn", default_width=800, default_height=500,
     )
