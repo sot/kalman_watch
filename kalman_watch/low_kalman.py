@@ -199,7 +199,9 @@ def get_plot_html(opt, lowkals: Table, show=False) -> str:
     fig.update_layout(
         {
             "xaxis_autorange": False,
-            "title": f"Duration of contiguous n_kalman <= 1 (autoscale for full mission)",
+            "title": (
+                f"Duration of contiguous n_kalman <= 1 (autoscale for full mission)"
+            ),
             "yaxis": {"title": "Duration (sec)", "autorange": False, "range": [0, 35]},
             "xaxis": {
                 "title": f"Date",
@@ -215,7 +217,10 @@ def get_plot_html(opt, lowkals: Table, show=False) -> str:
         fig.show()
 
     html = fig.to_html(
-        full_html=False, include_plotlyjs="cdn", default_width=800, default_height=500,
+        full_html=False,
+        include_plotlyjs="cdn",
+        default_width=800,
+        default_height=500,
     )
     return html
 
