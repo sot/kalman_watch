@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang=en>
+
+<head>
+    <meta charset=utf-8>
+    <title>Perigee {{date_perigee}}</title>
+    <style type="text/css">
+        table {
+            border-width: 1px;
+            border-spacing: 0px;
+            border-style: outset;
+            border-color: gray;
+            border-collapse: separate;
+            background-color: white;
+        }
+
+        table th,
+        td {
+            border-width: 1px;
+            padding: 1px 5px 1px 5px;
+            border-style: solid;
+            border-color: gray;
+            background-color: white;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Perigee Kalman index page</h1>
+    <table>
+        <tr>
+            <th>Perigee time</th><th>Low Kalman</th>
+            {% for dirname, n_low_kalman in values %}
+        </tr>
+        <tr>
+            <td><a href="{{dirname}}/index.html">{{dirname}}</a> </td>
+            {% if n_low_kalman %}<td>{{n_low_kalman}}</td>{% else %}<td></td>{% endif %}
+        </tr>
+        {% endfor %}
+    </table>
+</body>
+
+</html>
