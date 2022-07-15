@@ -167,7 +167,7 @@ def make_index_list_page(opt, evts_perigee: List["EventPerigee"]) -> None:
         kalman_stats.append(row)
 
     context = {
-        "kalman_stats": kalman_stats,
+        "kalman_stats": reversed(kalman_stats),
     }
     html = template.render(**context)
     (PERIGEES_DIR_PATH(opt.data_dir) / "index.html").write_text(html)
