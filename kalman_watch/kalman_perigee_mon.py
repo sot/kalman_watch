@@ -2,7 +2,7 @@ import argparse
 from dataclasses import dataclass
 from itertools import cycle
 from pathlib import Path
-from typing import Union, List, Tuple
+from typing import List, Tuple, Union
 
 import astropy.units as u
 import numpy as np
@@ -37,8 +37,36 @@ def EVT_PERIGEE_DIR_PATH(data_dir: str, evt: "EventPerigee"):
     return PERIGEES_DIR_PATH(data_dir) / evt.dirname
 
 
-def DASHBOARD_TEMPLATE_PATH():
-    return FILE_DIR / "index_dashboard_template.html"
+def INDEX_DETAIL_PATH():
+    return FILE_DIR / "index_kalman_perigee_detail.html"
+
+
+def INDEX_LIST_PATH():
+    return FILE_DIR / "index_kalman_perigee_list.html"
+
+
+# Default Kalman low intervals thresholds (n_kalstr, dur_limit) for
+# (AOKALSTR <= n_kalstr) and (duration > dur_limit)
+KALMAN_LIMITS = [
+    (3, 120),
+    (2, 20),
+    (1, 10),
+]
+
+# Colors for AOKALSTR plot taken from plotly default color cycle. Removed ones
+# that are too close to red which is used for low kalman intervals.
+COLOR_CYCLE = [
+    "#1f77b4",  # muted blue
+    #    '#ff7f0e',  # safety orange
+    "#2ca02c",  # cooked asparagus green
+    #     '#d62728',  # brick red
+    "#9467bd",  # muted purple
+    "#8c564b",  # chestnut brown
+    #     '#e377c2',  # raspberry yogurt pink
+    "#7f7f7f",  # middle gray
+    "#bcbd22",  # curry yellow-green
+    "#17becf",  # blue-teal
+]
 
 
 class CxoTimeField:
@@ -140,7 +168,7 @@ class EventPerigee:
             self._low_kalmans = self._get_low_kalmans()
         return self._low_kalmans
 
-    def _get_low_kalmans(self):
+    def _get_low_kalmans(self) -> Table:
         rows = []
         for n_kalstr, dur_limit in KALMAN_LIMITS:
             vals = self.tlm["aokalstr"].vals.copy()
@@ -166,15 +194,20 @@ class EventPerigee:
 
         return low_kalmans
 
-    def get_dashboard_page_html(self):
-        kalman_plot_html = self.get_plot_html()
+    def get_detail_html(self) -> str:
+        fig = self.get_plot_fig()
+        kalman_plot_html = fig.to_html(
+            full_html=False,
+            include_plotlyjs="cdn",
+            default_width=1000,
+            default_height=600,
+        )
+
         has_low_kalmans = len(self.low_kalmans) > 0
         low_kalmans_html = "\n".join(
-            self.low_kalmans.pformat(
-                html=True, max_width=-1, max_lines=-1, tableclass="sample"
-            )
+            self.low_kalmans.pformat(html=True, max_width=-1, max_lines=-1)
         )
-        template = Template(Path("index_kalman_template.html").read_text())
+        template = Template(INDEX_DETAIL_PATH().read_text())
         context = {
             "date_perigee": self.perigee.date[:-4],
             "has_low_kalmans": has_low_kalmans,
@@ -184,18 +217,20 @@ class EventPerigee:
             "evt_perigee_next": get_dirname(self.next_date),
             "obsids": [obs["obsid"] for obs in self.obss],
         }
-        html = template.render(**context)
+        html = template.render(**context)  # type: str
 
         return html
 
-    def get_plot_html(self, show=False):
+    def get_plot_fig(self) -> pgo.FigureWidget:
         date_perigee = self.perigee.date[:-4]
 
         perigee_times = self.tlm.perigee_times
         perigee_times = perigee_times.round(2)
         aokalstr = self.tlm["aokalstr"].vals.astype(float)
 
-        fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.1)
+        fig = make_subplots(
+            rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.1
+        )  # type: pgo.FigureWidget
         for obs, color in zip(self.obss, cycle(COLOR_CYCLE)):
             obs_tstart_rel = CxoTime(obs["obs_start"]).secs - self.perigee.cxcsec
             obs_tstop_rel = CxoTime(obs["obs_stop"]).secs - self.perigee.cxcsec
@@ -294,17 +329,7 @@ class EventPerigee:
         fig.update_yaxes(range=[-0.5, 8.5], row=2, col=1, title_text="Slot")
         fig.update_xaxes(title_text=f"Time relative to {date_perigee}", row=2, col=1)
 
-        if show:
-            fig.show()
-
-        html = fig.to_html(
-            full_html=False,
-            include_plotlyjs="cdn",
-            default_width=1000,
-            default_height=600,
-        )
-
-        return html
+        return fig
 
 
 def get_dirname(date: str) -> str:
@@ -335,29 +360,9 @@ def main(sys_args):
     start = stop - opt.lookback * u.day
 
     evts_perigee = get_evts_perigee(start, stop)
-
-    dirnames, n_low_kalmans = make_html_pages(opt, evts_perigee)
-
-    make_index_list_page(dirnames, n_low_kalmans)
-
-
-def make_html_pages(
-    opt: argparse.Namespace, evts_perigee: List[EventPerigee]
-) -> Tuple[List[str], int]:
-    dirnames = []
-    n_low_kalmans = []
-
     for evt_perigee in evts_perigee:
-        html, low_kalmans = evt_perigee.make_html_page()
-
-        dirname_path = EVT_PERIGEE_DIR_PATH(opt.data_dir)
-        dirname_path.mkdir(parents=True, exist_ok=True)
-        (dirname_path / "index.html").write_text(html)
-
-        dirnames.append(get_dirname(evt_perigee))
-        n_low_kalmans.append(len(low_kalmans))
-
-    return dirnames, n_low_kalmans
+        make_detail_page(opt, evt_perigee)
+    make_index_list_page(opt, evts_perigee)
 
 
 def get_evts_perigee(start, stop):
@@ -407,85 +412,22 @@ def get_evts_perigee(start, stop):
     return events
 
 
-# Default Kalman low intervals thresholds (n_kalstr, dur_limit) for
-# (AOKALSTR <= n_kalstr) and (duration > dur_limit)
-KALMAN_LIMITS = [
-    (3, 120),
-    (2, 20),
-    (1, 10),
-]
+def make_detail_page(
+    opt: argparse.Namespace, evt_perigee: EventPerigee
+) -> Tuple[List[str], int]:
+    html = evt_perigee.get_detail_html()
 
-# Colors for AOKALSTR plot taken from plotly default color cycle. Removed ones
-# that are too close to red which is used for low kalman intervals.
-COLOR_CYCLE = [
-    "#1f77b4",  # muted blue
-    #    '#ff7f0e',  # safety orange
-    "#2ca02c",  # cooked asparagus green
-    #     '#d62728',  # brick red
-    "#9467bd",  # muted purple
-    "#8c564b",  # chestnut brown
-    #     '#e377c2',  # raspberry yogurt pink
-    "#7f7f7f",  # middle gray
-    "#bcbd22",  # curry yellow-green
-    "#17becf",  # blue-teal
-]
+    dirname_path = EVT_PERIGEE_DIR_PATH(opt.data_dir, evt_perigee)
+    dirname_path.mkdir(parents=True, exist_ok=True)
+    (dirname_path / "index.html").write_text(html)
 
 
-def make_index_list_page(opt, dirnames, n_low_kalmans):
-    template = Template(Path("index_list_template.html").read_text())
+def make_index_list_page(opt, evts_perigee: List[EventPerigee]) -> None:
+    template = Template(INDEX_LIST_PATH().read_text())
+    dirnames = [evt.dirname for evt in evts_perigee]
+    n_low_kalmans = [len(evt.low_kalmans) for evt in evts_perigee]
     context = {
         "values": list(zip(reversed(dirnames), reversed(n_low_kalmans))),
     }
     html = template.render(**context)
     (PERIGEES_DIR_PATH(opt.data_dir) / "index.html").write_text(html)
-
-
-def make_plot_plotly(lowkals):
-    dates = CxoTime(lowkals["datestart"])
-    times = dates.datetime64
-    text_obsids = np.array(
-        [f"{lowkal['datestart'][:-4]} ObsID {lowkal['obsid']}" for lowkal in lowkals]
-    )
-
-    layout = {
-        "title": f"Duration of contiguous n_kalman <= 1",
-        "yaxis": {"title": "Duration (sec)"},
-        "xaxis": {"title": f"Date"},
-        "yaxis_range": [0, 35],
-    }
-
-    fig = pgo.Figure(layout=layout)
-    recent = dates > CxoTime.now() - 30 * u.day
-    for color, mask in [
-        ("#1f77b4", ~recent),  # muted blue
-        ("#ff7f0e", recent),  # safety orange
-    ]:
-        trace = pgo.Scatter(
-            x=times[mask],
-            y=lowkals["duration"][mask].clip(None, 32),
-            hoverinfo="text",
-            mode="markers",
-            line={"color": color},
-            showlegend=False,
-            marker={"opacity": 0.75, "size": 8},
-            text=text_obsids[mask],
-        )
-        fig.add_trace(trace)
-
-    fig.update_layout(
-        {
-            "xaxis_autorange": False,
-            "xaxis_range": [
-                (CxoTime.now() - 5 * 365 * u.day).datetime,
-                CxoTime.now().datetime,
-            ],
-        }
-    )
-    fig.show()
-    fig.write_html(
-        "test_plotly.html",
-        full_html=False,
-        include_plotlyjs="cdn",
-        default_width=1000,
-        default_height=600,
-    )
