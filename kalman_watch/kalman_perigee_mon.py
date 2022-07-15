@@ -69,6 +69,100 @@ COLOR_CYCLE = [
 ]
 
 
+def get_dirname(date: str) -> str:
+    out = date[:17].replace(":", "_") if date else ""
+    return out
+
+
+def get_opt(sys_args):
+    parser = argparse.ArgumentParser(
+        description="Kalman star watch {}".format(__version__)
+    )
+    parser.add_argument("--stop", type=str, help="Stop date (default=NOW)")
+    parser.add_argument(
+        "--lookback",
+        type=float,
+        default=14,
+        help="Lookback days from stop for processing (days, default=14)",
+    )
+    parser.add_argument("--data-dir", type=str, default=".", help="Data directory")
+    args = parser.parse_args(sys_args)
+    return args
+
+
+def main(sys_args):
+    opt = get_opt(sys_args)
+
+    stop = CxoTime(opt.stop)
+    start = stop - opt.lookback * u.day
+
+    evts_perigee = get_evts_perigee(start, stop)
+
+    for evt_perigee in evts_perigee:
+        evt_perigee.make_detail_page(opt)
+
+    make_index_list_page(opt, evts_perigee)
+
+
+def get_evts_perigee(start, stop):
+    """
+    Get the perigee EEF1000, EPERIGEE and XEF1000 fully within start/stop
+
+    :param start: CxoTime-like
+        Start of date range
+    :param stop: CxoTime-like
+        End of date range
+    :returns: list of PerigeeEvent
+        List of PerigeeEvent objects
+    """
+    event_types = ["EEF1000", "EPERIGEE", "XEF1000"]
+    cmds = get_cmds(start=start, stop=stop, type="ORBPOINT")
+    ok = np.isin(cmds["event_type"], event_types)
+    cmds = cmds[ok]
+
+    # Find index in cmds of EEF1000 commands
+    idxs_rad_entry = np.where(cmds["event_type"] == event_types[0])[0]
+    if len(idxs_rad_entry) == 0:
+        return []
+
+    # Iterate through commands starting from first rad entry in sets of 3 for
+    # rad entry, perigee and rad exit.
+    events = []
+    cmds = cmds[idxs_rad_entry[0] :]
+    for cmd0, cmd1, cmd2 in zip(cmds[0::3], cmds[1::3], cmds[2::3]):
+        cmds_event_types = [cmd["event_type"] for cmd in [cmd0, cmd1, cmd2]]
+        if cmds_event_types != event_types:
+            raise ValueError(f"Expected {event_types} but got {cmds_event_types}")
+
+        event = EventPerigee(
+            rad_entry=cmd0["date"], perigee=cmd1["date"], rad_exit=cmd2["date"]
+        )
+        if event.tlm is not None:
+            events.append(event)
+        else:
+            break
+
+    for evt_prev, evt, evt_next in zip(
+        [None] + events[:-1], events, events[1:] + [None]
+    ):
+        evt.prev_date = "" if evt_prev is None else evt_prev.perigee.date
+        evt.next_date = "" if evt_next is None else evt_next.perigee.date
+
+    return events
+
+
+
+def make_index_list_page(opt, evts_perigee: List["EventPerigee"]) -> None:
+    template = Template(INDEX_LIST_PATH().read_text())
+    dirnames = [evt.dirname for evt in evts_perigee]
+    n_low_kalmans = [len(evt.low_kalmans) for evt in evts_perigee]
+    context = {
+        "values": list(zip(reversed(dirnames), reversed(n_low_kalmans))),
+    }
+    html = template.render(**context)
+    (PERIGEES_DIR_PATH(opt.data_dir) / "index.html").write_text(html)
+
+
 class CxoTimeField:
     def __init__(self, *, default=None):
         self._default = default
@@ -221,6 +315,13 @@ class EventPerigee:
 
         return html
 
+    def make_detail_page(self, opt):
+        html = self.get_detail_html()
+
+        dirname_path = EVT_PERIGEE_DIR_PATH(opt.data_dir, self)
+        dirname_path.mkdir(parents=True, exist_ok=True)
+        (dirname_path / "index.html").write_text(html)
+
     def get_plot_fig(self) -> pgo.FigureWidget:
         date_perigee = self.perigee.date[:-4]
 
@@ -330,104 +431,3 @@ class EventPerigee:
         fig.update_xaxes(title_text=f"Time relative to {date_perigee}", row=2, col=1)
 
         return fig
-
-
-def get_dirname(date: str) -> str:
-    out = date[:17].replace(":", "_") if date else ""
-    return out
-
-
-def get_opt(sys_args):
-    parser = argparse.ArgumentParser(
-        description="Kalman star watch {}".format(__version__)
-    )
-    parser.add_argument("--stop", type=str, help="Stop date (default=NOW)")
-    parser.add_argument(
-        "--lookback",
-        type=float,
-        default=14,
-        help="Lookback days from stop for processing (days, default=14)",
-    )
-    parser.add_argument("--data-dir", type=str, default=".", help="Data directory")
-    args = parser.parse_args(sys_args)
-    return args
-
-
-def main(sys_args):
-    opt = get_opt(sys_args)
-
-    stop = CxoTime(opt.stop)
-    start = stop - opt.lookback * u.day
-
-    evts_perigee = get_evts_perigee(start, stop)
-    for evt_perigee in evts_perigee:
-        make_detail_page(opt, evt_perigee)
-    make_index_list_page(opt, evts_perigee)
-
-
-def get_evts_perigee(start, stop):
-    """
-    Get the perigee EEF1000, EPERIGEE and XEF1000 fully within start/stop
-
-    :param start: CxoTime-like
-        Start of date range
-    :param stop: CxoTime-like
-        End of date range
-    :returns: list of PerigeeEvent
-        List of PerigeeEvent objects
-    """
-    event_types = ["EEF1000", "EPERIGEE", "XEF1000"]
-    cmds = get_cmds(start=start, stop=stop, type="ORBPOINT")
-    ok = np.isin(cmds["event_type"], event_types)
-    cmds = cmds[ok]
-
-    # Find index in cmds of EEF1000 commands
-    idxs_rad_entry = np.where(cmds["event_type"] == event_types[0])[0]
-    if len(idxs_rad_entry) == 0:
-        return []
-
-    # Iterate through commands starting from first rad entry in sets of 3 for
-    # rad entry, perigee and rad exit.
-    events = []
-    cmds = cmds[idxs_rad_entry[0] :]
-    for cmd0, cmd1, cmd2 in zip(cmds[0::3], cmds[1::3], cmds[2::3]):
-        cmds_event_types = [cmd["event_type"] for cmd in [cmd0, cmd1, cmd2]]
-        if cmds_event_types != event_types:
-            raise ValueError(f"Expected {event_types} but got {cmds_event_types}")
-
-        event = EventPerigee(
-            rad_entry=cmd0["date"], perigee=cmd1["date"], rad_exit=cmd2["date"]
-        )
-        if event.tlm is not None:
-            events.append(event)
-        else:
-            break
-
-    for evt_prev, evt, evt_next in zip(
-        [None] + events[:-1], events, events[1:] + [None]
-    ):
-        evt.prev_date = "" if evt_prev is None else evt_prev.perigee.date
-        evt.next_date = "" if evt_next is None else evt_next.perigee.date
-
-    return events
-
-
-def make_detail_page(
-    opt: argparse.Namespace, evt_perigee: EventPerigee
-) -> Tuple[List[str], int]:
-    html = evt_perigee.get_detail_html()
-
-    dirname_path = EVT_PERIGEE_DIR_PATH(opt.data_dir, evt_perigee)
-    dirname_path.mkdir(parents=True, exist_ok=True)
-    (dirname_path / "index.html").write_text(html)
-
-
-def make_index_list_page(opt, evts_perigee: List[EventPerigee]) -> None:
-    template = Template(INDEX_LIST_PATH().read_text())
-    dirnames = [evt.dirname for evt in evts_perigee]
-    n_low_kalmans = [len(evt.low_kalmans) for evt in evts_perigee]
-    context = {
-        "values": list(zip(reversed(dirnames), reversed(n_low_kalmans))),
-    }
-    html = template.render(**context)
-    (PERIGEES_DIR_PATH(opt.data_dir) / "index.html").write_text(html)
