@@ -1,8 +1,12 @@
+"""Watch Kalman star data during perigee passages.
+"""
+
+
 import argparse
 from dataclasses import dataclass
 from itertools import cycle
 from pathlib import Path
-from typing import List, Tuple, Union
+from typing import List, Union
 
 import astropy.units as u
 import numpy as np
@@ -151,13 +155,19 @@ def get_evts_perigee(start, stop):
     return events
 
 
-
 def make_index_list_page(opt, evts_perigee: List["EventPerigee"]) -> None:
     template = Template(INDEX_LIST_PATH().read_text())
-    dirnames = [evt.dirname for evt in evts_perigee]
-    n_low_kalmans = [len(evt.low_kalmans) for evt in evts_perigee]
+    kalman_stats = []
+    for evt in evts_perigee:
+        low_kals = evt.low_kalmans
+        row = {"dirname": evt.dirname}
+        for nle in (3, 2, 1):
+            row[f"n{nle}_ints"] = np.count_nonzero((low_kals["n_kalstr"] == nle)) or ""
+            row[f"n{nle}_cnt"] = low_kals.meta[f"n{nle}_cnt"] or ""
+        kalman_stats.append(row)
+
     context = {
-        "values": list(zip(reversed(dirnames), reversed(n_low_kalmans))),
+        "kalman_stats": kalman_stats,
     }
     html = template.render(**context)
     (PERIGEES_DIR_PATH(opt.data_dir) / "index.html").write_text(html)
@@ -281,10 +291,26 @@ class EventPerigee:
                 row["tstop_rel"] = p1
                 rows.append(row)
 
-        low_kalmans = Table(rows=rows)
+        if len(rows) > 0:
+            low_kalmans = Table(rows=rows)
+        else:
+            low_kalmans = Table(
+                names=[
+                    "datestart",
+                    "datestop",
+                    "duration",
+                    "n_kalstr",
+                    "tstart_rel",
+                    "tstop_rel",
+                ],
+                dtype=[str, str, float, int, float, float],
+            )
         for col in low_kalmans.itercols():
             if col.info.dtype.kind == "f":
                 col.info.format = ".1f"
+
+        for nle in (1, 2, 3):
+            low_kalmans.meta[f"n{nle}_cnt"] = np.count_nonzero(vals <= nle)
 
         return low_kalmans
 

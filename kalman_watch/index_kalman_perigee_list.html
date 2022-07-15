@@ -29,12 +29,23 @@
     <h1>Perigee Kalman index page</h1>
     <table>
         <tr>
-            <th>Perigee time</th><th>Low Kalman</th>
-            {% for dirname, n_low_kalman in values %}
+            <th>Perigee time</th>
+            <th>N&le;3 for &gt;120 s</th>
+            <th>N&le;2 for &gt;20 s</th>
+            <th>N&le;1 for &gt;10 s</th>
+            <th>N&le;3</th>
+            <th>N&le;2</th>
+            <th>N&le;1</th>
         </tr>
+        {% for row in kalman_stats %}
         <tr>
-            <td><a href="{{dirname}}/index.html">{{dirname}}</a> </td>
-            {% if n_low_kalman %}<td>{{n_low_kalman}}</td>{% else %}<td></td>{% endif %}
+            <td><a href="{{row.dirname}}/index.html">{{row.dirname}}</a> </td>
+            <td>{{row.n3_ints}}</td>
+            <td>{{row.n2_ints}}</td>
+            <td>{{row.n1_ints}}</td>
+            <td>{{row.n3_cnt}}</td>
+            <td>{{row.n2_cnt}}</td>
+            <td>{{row.n1_cnt}}</td>
         </tr>
         {% endfor %}
     </table>
