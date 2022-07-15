@@ -19,11 +19,11 @@ from jinja2 import Template
 from kadi.commands import get_observations
 from kadi.commands.commands_v2 import get_cmds
 from plotly.subplots import make_subplots
-from ska_helpers.logging import basic_logger
+# from ska_helpers.logging import basic_logger
 
 from kalman_watch import __version__
 
-logger = basic_logger(__name__, level="INFO")
+# logger = basic_logger(__name__, level="INFO")
 
 
 class NotEnoughTelemetry(ValueError):
@@ -94,7 +94,7 @@ def get_opt(sys_args):
     return args
 
 
-def main(sys_args):
+def main(sys_args=None):
     opt = get_opt(sys_args)
 
     stop = CxoTime(opt.stop)
@@ -457,3 +457,7 @@ class EventPerigee:
         fig.update_xaxes(title_text=f"Time relative to {date_perigee}", row=2, col=1)
 
         return fig
+
+
+if __name__ == "__main__":
+    main()
