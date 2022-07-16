@@ -19,9 +19,11 @@ from jinja2 import Template
 from kadi.commands import get_observations
 from kadi.commands.commands_v2 import get_cmds
 from plotly.subplots import make_subplots
-# from ska_helpers.logging import basic_logger
 
 from kalman_watch import __version__
+
+# from ska_helpers.logging import basic_logger
+
 
 # logger = basic_logger(__name__, level="INFO")
 
