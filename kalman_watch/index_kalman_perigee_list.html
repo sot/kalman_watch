@@ -26,7 +26,7 @@
 </head>
 
 <body>
-    <h1>Perigee Kalman index page</h1>
+    <h1>Perigee Kalman index page: {{description}}</h1>
     <table>
         <tr>
             <th>Perigee time</th>
@@ -49,6 +49,17 @@
         </tr>
         {% endfor %}
     </table>
+
+    {% if years %}
+    <h2>Perigee plots by year</h2>
+    <table>
+        <tr><th>Year</th></tr>
+        {% for year in years %}
+        <tr><td><a href="{{year}}/index.html">{{year}}</a></td></tr>
+        {% endfor %}
+    </table>
+    {% endif %}
+
 </body>
 
 </html>

@@ -27,10 +27,6 @@ from kalman_watch import __version__
 LOGGER = basic_logger(__name__, level="INFO")
 
 
-class NotEnoughTelemetry(ValueError):
-    pass
-
-
 FILE_DIR = Path(__file__).parent
 
 
@@ -52,22 +48,6 @@ def INDEX_DETAIL_PATH():
 
 def INDEX_LIST_PATH():
     return FILE_DIR / "index_kalman_perigee_list.html"
-
-
-KALMAN_STATS_DTYPE = dict(
-    [
-        ("dirname", "U10"),
-        ("perigee", "U21"),
-        ("rad_entry", "U21"),
-        ("rad_exit", "U21"),
-        ("n3_ints", "i8"),
-        ("n3_cnt", "i8"),
-        ("n2_ints", "i8"),
-        ("n2_cnt", "i8"),
-        ("n1_ints", "i8"),
-        ("n1_cnt", "i8"),
-    ]
-)
 
 
 # Default Kalman low intervals thresholds (n_kalstr, dur_limit) for
@@ -169,10 +149,7 @@ def read_kalman_stats(opt) -> Table:
         kalman_stats = Table.read(path)
     else:
         LOGGER.info(f"No kalman perigee data found at {path}, creating empty table")
-        kalman_stats = Table(
-            names=list(KALMAN_STATS_DTYPE.keys()),
-            dtype=list(KALMAN_STATS_DTYPE.values()),
-        )
+        kalman_stats = Table()
     return kalman_stats
 
 
@@ -258,27 +235,38 @@ def get_stats(evts_perigee) -> Table:
             row[f"n{nle}_cnt"] = low_kals.meta[f"n{nle}_cnt"]
         rows.append(row)
 
-    if rows:
-        out = Table(rows=rows)
-    else:
-        out = Table(
-            names=list(KALMAN_STATS_DTYPE.keys()),
-            dtype=list(KALMAN_STATS_DTYPE.values()),
-        )
+    out = Table(rows=rows)
     return out
 
 
 def make_index_list_pages(opt, stats_new: Table, stats_all: Table) -> None:
+    years_new = CxoTime(stats_new["perigee"]).ymdhms.year
+    years_all = CxoTime(stats_all["perigee"]).ymdhms.year
+
     template = Template(INDEX_LIST_PATH().read_text())
 
     # Write index page for last 90 days of perigee data
     ok = CxoTime.now() - CxoTime(stats_all["perigee"]) < 90 * u.day
     stats_recent = stats_all[ok]
     path = PERIGEES_DIR_PATH(opt.data_dir) / "index.html"
-    make_index_list_page(path, template, stats_recent)
+    make_index_list_page(
+        path,
+        template,
+        stats_recent,
+        years=np.unique(years_all),
+        description="last 90 days",
+    )
+
+    # Write index page for each calendar year which is in stats_new
+    for year in np.unique(years_new):
+        ok = years_all == year
+        stats_year = stats_all[ok]
+        path = PERIGEES_DIR_PATH(opt.data_dir) / str(year) / "index.html"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        make_index_list_page(path, template, stats_year, description=f"year {year}")
 
 
-def make_index_list_page(path, template, stats):
+def make_index_list_page(path, template, stats, years=None, description=None):
     # Replace all zeros with "" for the HTML table
     context_stats = []
     for row in stats:
@@ -287,8 +275,10 @@ def make_index_list_page(path, template, stats):
         }
         context_stats.append(context_row)
 
-    html = template.render(kalman_stats=context_stats)
-    LOGGER.info(f"Writing index list page {path}")
+    html = template.render(
+        kalman_stats=context_stats, description=description, years=years
+    )
+    LOGGER.info(f"Writing index list page for {description} to {path}")
     path.write_text(html)
 
 
