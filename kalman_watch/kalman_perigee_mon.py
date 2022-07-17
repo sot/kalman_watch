@@ -108,12 +108,6 @@ def get_opt(sys_args):
         description="Kalman star watch {}".format(__version__)
     )
     parser.add_argument("--stop", type=str, help="Stop date (default=NOW)")
-    parser.add_argument(
-        "--lookback",
-        type=float,
-        default=14,
-        help="Lookback days from stop for processing (days, default=14)",
-    )
     parser.add_argument("--data-dir", type=str, default=".", help="Data directory")
     parser.add_argument(
         "--email",
@@ -129,24 +123,37 @@ def get_opt(sys_args):
 def main(sys_args=None):
     opt = get_opt(sys_args)
 
-    stats_prev = read_kalman_stats(opt)
-    if len(stats_prev) == 0:
-        date_last = "1999:001"
-    else:
-        date_last = stats_prev[0]["perigee"]
-
     stop = CxoTime(opt.stop)
-    start = stop - opt.lookback * u.day
-    if start.date < date_last:
-        start = CxoTime(date_last) + 1 * u.day
 
-    evts_perigee = get_evts_perigee(start, stop)
+    stats_prev = read_kalman_stats(opt)
+    if len(stats_prev) > 0:
+        # If there are previous events then back up to get the most recent one
+        # again. This is to reprocess and potentially fill in the "next" link in the
+        # detail HTML page.
+        start = CxoTime(stats_prev[0]["perigee"]) - 1 * u.day
+    else:
+        # Get a few perigees to start the history
+        start = stop - 10 * u.day
+
+    # Get date of the previous perigee for the most recent event in stats_prev.
+    # This is essentially the continuity.
+    evt_last_date_prev = (
+        None if len(stats_prev) < 2 else CxoTime(stats_prev[1]["perigee"])
+    )
+    evts_perigee = get_evts_perigee(start, stop, evt_last_date_prev)
+
+    # Bail out if there are no new perigee events. Since we backed up to the
+    # previous perigee we need at least two perigee events.
+    if len(evts_perigee) < 2:
+        LOGGER.info("No new perigee events")
+        return
 
     for evt_perigee in evts_perigee:
         evt_perigee.make_detail_page(opt)
 
     stats_new = get_stats(evts_perigee)
-    stats_all = vstack([stats_new, stats_prev])
+    # Combine new and prev, dropping the first prev entry since it is a repeat
+    stats_all = vstack([stats_new, stats_prev[1:]])
 
     make_index_list_pages(opt, stats_new, stats_all)
 
@@ -169,7 +176,9 @@ def read_kalman_stats(opt) -> Table:
     return kalman_stats
 
 
-def get_evts_perigee(start: CxoTime, stop: CxoTime) -> List["EventPerigee"]:
+def get_evts_perigee(
+    start: CxoTime, stop: CxoTime, evt_last_date_prev: CxoTime
+) -> List["EventPerigee"]:
     """
     Get the perigee EEF1000, EPERIGEE and XEF1000 fully within start/stop
 
@@ -180,7 +189,10 @@ def get_evts_perigee(start: CxoTime, stop: CxoTime) -> List["EventPerigee"]:
     :returns: list of PerigeeEvent
         List of PerigeeEvent objects
     """
-    LOGGER.info(f"Getting perigee events between {start} and {stop}")
+    LOGGER.info(
+        f"Getting perigee events between {start} and {stop} with"
+        f" evt_last_date_prev={evt_last_date_prev}"
+    )
     event_types = ["EEF1000", "EPERIGEE", "XEF1000"]
     cmds = get_cmds(start=start, stop=stop, type="ORBPOINT")
     ok = np.isin(cmds["event_type"], event_types)
@@ -215,6 +227,9 @@ def get_evts_perigee(start: CxoTime, stop: CxoTime) -> List["EventPerigee"]:
     ):
         evt.prev_date = None if evt_prev is None else evt_prev.perigee
         evt.next_date = None if evt_next is None else evt_next.perigee
+
+    if evt_last_date_prev is not None:
+        events[0].prev_date = evt_last_date_prev
 
     return events
 
@@ -440,7 +455,6 @@ class EventPerigee:
         context = {
             "date_perigee": self.perigee.date[:-4],
             "dirname": self.dirname,
-            "dirname_year": self.dirname[:4],
             "has_low_kalmans": has_low_kalmans,
             "low_kalmans_html": low_kalmans_html,
             "kalman_plot_html": kalman_plot_html,
