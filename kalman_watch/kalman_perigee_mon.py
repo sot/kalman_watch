@@ -11,6 +11,7 @@ from typing import List, Union
 import astropy.units as u
 import numpy as np
 import plotly.graph_objects as pgo
+from acdc.common import send_mail
 from astropy.table import Table
 from cheta.fetch import MSIDset
 from cheta.utils import logical_intervals
@@ -19,13 +20,11 @@ from jinja2 import Template
 from kadi.commands import get_observations
 from kadi.commands.commands_v2 import get_cmds
 from plotly.subplots import make_subplots
+from ska_helpers.logging import basic_logger
 
 from kalman_watch import __version__
 
-# from ska_helpers.logging import basic_logger
-
-
-# logger = basic_logger(__name__, level="INFO")
+LOGGER = basic_logger(__name__, level="INFO")
 
 
 class NotEnoughTelemetry(ValueError):
@@ -75,8 +74,12 @@ COLOR_CYCLE = [
 ]
 
 
-def get_dirname(date: str) -> str:
-    out = date[:17].replace(":", "_") if date else ""
+def get_dirname(date: Union[CxoTime, None]) -> str:
+    if date is None:
+        out = ""
+    else:
+        ymdhms = date.ymdhms
+        out = f"{ymdhms['year']}/{ymdhms['month']:02d}-{ymdhms['day']:02d}"
     return out
 
 
@@ -92,6 +95,13 @@ def get_opt(sys_args):
         help="Lookback days from stop for processing (days, default=14)",
     )
     parser.add_argument("--data-dir", type=str, default=".", help="Data directory")
+    parser.add_argument(
+        "--email",
+        action="append",
+        dest="emails",
+        default=[],
+        help="Email address for notification",
+    )
     args = parser.parse_args(sys_args)
     return args
 
@@ -107,7 +117,9 @@ def main(sys_args=None):
     for evt_perigee in evts_perigee:
         evt_perigee.make_detail_page(opt)
 
-    make_index_list_page(opt, evts_perigee)
+    kalman_stats = get_stats(evts_perigee)
+
+    make_index_list_page(opt, kalman_stats)
 
 
 def get_evts_perigee(start, stop):
@@ -121,6 +133,7 @@ def get_evts_perigee(start, stop):
     :returns: list of PerigeeEvent
         List of PerigeeEvent objects
     """
+    LOGGER.info(f"Getting perigee events between {start} and {stop}")
     event_types = ["EEF1000", "EPERIGEE", "XEF1000"]
     cmds = get_cmds(start=start, stop=stop, type="ORBPOINT")
     ok = np.isin(cmds["event_type"], event_types)
@@ -151,28 +164,61 @@ def get_evts_perigee(start, stop):
     for evt_prev, evt, evt_next in zip(
         [None] + events[:-1], events, events[1:] + [None]
     ):
-        evt.prev_date = "" if evt_prev is None else evt_prev.perigee.date
-        evt.next_date = "" if evt_next is None else evt_next.perigee.date
+        evt.prev_date = None if evt_prev is None else evt_prev.perigee
+        evt.next_date = None if evt_next is None else evt_next.perigee
 
     return events
 
 
-def make_index_list_page(opt, evts_perigee: List["EventPerigee"]) -> None:
-    template = Template(INDEX_LIST_PATH().read_text())
-    kalman_stats = []
-    for evt in evts_perigee:
-        low_kals = evt.low_kalmans
-        row = {"dirname": evt.dirname}
-        for nle in (3, 2, 1):
-            row[f"n{nle}_ints"] = np.count_nonzero((low_kals["n_kalstr"] == nle)) or ""
-            row[f"n{nle}_cnt"] = low_kals.meta[f"n{nle}_cnt"] or ""
-        kalman_stats.append(row)
+def get_stats(evts_perigee) -> Table:
+    """
+    Get the kalman perigee stats for the given events.
 
-    context = {
-        "kalman_stats": reversed(kalman_stats),
-    }
+    :param evts_perigee: list of PerigeeEvent
+        List of PerigeeEvent objects
+    :returns: list of dict
+        List of dicts with kalman perigee stats
+    """
+    rows = []
+
+    for evt in reversed(evts_perigee):
+        low_kals = evt.low_kalmans
+        row = {
+            "dirname": evt.dirname,
+            "perigee": evt.perigee.date[:19],
+        }
+        for key in ["rad_entry", "perigee", "rad_exit"]:
+            row[key] = getattr(evt, key).date
+        for nle in (3, 2, 1):
+            row[f"n{nle}_ints"] = np.count_nonzero((low_kals["n_kalstr"] == nle))
+            row[f"n{nle}_cnt"] = low_kals.meta[f"n{nle}_cnt"]
+        rows.append(row)
+
+    return Table(rows=rows)
+
+
+def make_index_list_page(opt, kalman_stats: Table) -> None:
+    template = Template(INDEX_LIST_PATH().read_text())
+
+    # Replace all zeros with "" for the HTML table
+    context_stats = []
+    for row in kalman_stats:
+        context_row = {
+            key: (val if val != 0 else "") for key, val in zip(row.keys(), row.values())
+        }
+        context_stats.append(context_row)
+
+    context = {"kalman_stats": context_stats}
     html = template.render(**context)
-    (PERIGEES_DIR_PATH(opt.data_dir) / "index.html").write_text(html)
+    path = PERIGEES_DIR_PATH(opt.data_dir) / "index.html"
+    LOGGER.info(f"Writing index list page {path}")
+    path.write_text(html)
+
+
+def send_process_mail(opt):
+    subject = f"kalman_watch: long drop interval(s)"
+    text = "FIGURE IT OUT!"
+    send_mail(LOGGER, opt, subject, text, __file__)
 
 
 class CxoTimeField:
@@ -211,7 +257,7 @@ class EventPerigee:
 
     @property
     def dirname(self):
-        return get_dirname(self.perigee.date)
+        return get_dirname(self.perigee)
 
     @property
     def obss(self):
@@ -239,7 +285,6 @@ class EventPerigee:
             "aoacrpt",
             "aoacfct*",
         ]
-        # TODO: use MAUDE backorbit telemetry
         tlm = MSIDset(msids, self.rad_entry, self.rad_exit)
         if (
             len(tlm["aokalstr"]) == 0
@@ -332,11 +377,13 @@ class EventPerigee:
         template = Template(INDEX_DETAIL_PATH().read_text())
         context = {
             "date_perigee": self.perigee.date[:-4],
+            "dirname": self.dirname,
+            "dirname_year": self.dirname[:4],
             "has_low_kalmans": has_low_kalmans,
             "low_kalmans_html": low_kalmans_html,
             "kalman_plot_html": kalman_plot_html,
-            "evt_perigee_prev": get_dirname(self.prev_date),
-            "evt_perigee_next": get_dirname(self.next_date),
+            "evt_perigee_prev_dirname": get_dirname(self.prev_date),
+            "evt_perigee_next_dirname": get_dirname(self.next_date),
             "obsids": [obs["obsid"] for obs in self.obss],
         }
         html = template.render(**context)  # type: str
@@ -461,5 +508,5 @@ class EventPerigee:
         return fig
 
 
-if __name__ == "__main__":
-    main()
+# if __name__ == "__main__":
+#     main()

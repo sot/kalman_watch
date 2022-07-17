@@ -3,7 +3,7 @@
 
 <head>
     <meta charset=utf-8>
-    <title>Perigee {{date_perigee}}</title>
+    <title>Perigee {{dirname}}</title>
     <style type="text/css">
         table {
             border-width: 1px;
@@ -24,11 +24,12 @@
 </head>
 
 <body>
-    {% if evt_perigee_prev %} <a href="../{{evt_perigee_prev}}/index.html">Previous</a>{%
+    {% if evt_perigee_prev_dirname %} <a href="../{{evt_perigee_prev}}/index.html">Previous</a>{%
     endif %}
-    <a href="../index.html">Index</a>
-    {% if evt_perigee_next %} <a href="../{{evt_perigee_next}}/index.html">Next</a>{% endif %}
-    <h1>Perigee Kalman plot {{date_perigee}}</h1>
+    <a href="../../index.html">Index</a>
+    <a href="../{{dirname_year}}">{{dirname_year}}</a>
+    {% if evt_perigee_next_dirname %} <a href="../{{evt_perigee_next}}/index.html">Next</a>{% endif %}
+    <h1>Perigee Kalman plot {{date_perigee}} ({{dirname}})</h1>
     {{kalman_plot_html}}
     <p></p>
     {% if has_low_kalmans %}
