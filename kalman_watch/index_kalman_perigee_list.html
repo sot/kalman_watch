@@ -26,10 +26,14 @@
 </head>
 
 <body>
+    {% if prev %} <a href="{{prev}}/index.html">Previous</a>{% endif %}
+    {% if index %} <a href="{{index}}/index.html">Index</a>{% endif %}
+    {% if next %} <a href="{{next}}/index.html">Next</a>{% endif %}
     <h1>Perigee Kalman index page: {{description}}</h1>
     <table>
         <tr>
-            <th>Perigee time</th>
+            <th>Perigee ID</th>
+            <th>Date</th>
             <th>N&le;3 for &gt;120 s</th>
             <th>N&le;2 for &gt;20 s</th>
             <th>N&le;1 for &gt;10 s</th>
@@ -40,6 +44,7 @@
         {% for row in kalman_stats %}
         <tr>
             <td><a href="{{row.dirname}}/index.html">{{row.dirname}}</a> </td>
+            <td>{{row.perigee}}</td>
             <td>{{row.n3_ints}}</td>
             <td>{{row.n2_ints}}</td>
             <td>{{row.n1_ints}}</td>

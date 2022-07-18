@@ -3,6 +3,7 @@
 
 
 import argparse
+import calendar
 from dataclasses import dataclass
 from itertools import cycle
 from pathlib import Path
@@ -22,6 +23,7 @@ from kadi.commands.commands_v2 import get_cmds
 from plotly.subplots import make_subplots
 from ska_helpers.logging import basic_logger
 
+from kadi.commands.states import get_states, reduce_states
 from kalman_watch import __version__
 
 LOGGER = basic_logger(__name__, level="INFO")
@@ -79,7 +81,8 @@ def get_dirname(date: Union[CxoTime, None]) -> str:
         out = ""
     else:
         ymdhms = date.ymdhms
-        out = f"{ymdhms['year']}/{ymdhms['month']:02d}-{ymdhms['day']:02d}"
+        mon = calendar.month_abbr[ymdhms.month]
+        out = f"{ymdhms['year']}/{mon}-{ymdhms['day']:02d}"
     return out
 
 
@@ -157,7 +160,10 @@ def get_evts_perigee(
     start: CxoTime, stop: CxoTime, evt_last_date_prev: CxoTime
 ) -> List["EventPerigee"]:
     """
-    Get the perigee EEF1000, EPERIGEE and XEF1000 fully within start/stop
+    Get the perigee events within start/stop.
+
+    This selects perigees within start/stop and then finds the span of
+    ERs (obsid > 38000) within +/- 12 hours of perigee.
 
     :param start: CxoTime
         Start of date range
@@ -170,32 +176,48 @@ def get_evts_perigee(
         f"Getting perigee events between {start} and {stop} with"
         f" evt_last_date_prev={evt_last_date_prev}"
     )
-    event_types = ["EEF1000", "EPERIGEE", "XEF1000"]
-    cmds = get_cmds(start=start, stop=stop, type="ORBPOINT")
-    ok = np.isin(cmds["event_type"], event_types)
-    cmds = cmds[ok]
+    # event_types = ["EEF1000", "EPERIGEE", "XEF1000"]
+    cmds_perigee = get_cmds(
+        start=start, stop=stop, type="ORBPOINT", event_type="EPERIGEE"
+    )
 
-    # Find index in cmds of EEF1000 commands
-    idxs_rad_entry = np.where(cmds["event_type"] == event_types[0])[0]
-    if len(idxs_rad_entry) == 0:
-        return []
+    # Find contiguous intervals of ERs (obsid > 38000)
+    states = get_states(start - 3 * u.day, stop + 3 * u.day, state_keys=["obsid"])
+    states["obsid"] = np.where(states["obsid"] > 38000, 1, 0)
+    states = reduce_states(states, state_keys=["obsid"], merge_identical=True)
 
-    # Iterate through commands starting from first rad entry in sets of 3 for
-    # rad entry, perigee and rad exit.
     events = []
-    cmds = cmds[idxs_rad_entry[0] :]
-    for cmd0, cmd1, cmd2 in zip(cmds[0::3], cmds[1::3], cmds[2::3]):
-        cmds_event_types = [cmd["event_type"] for cmd in [cmd0, cmd1, cmd2]]
-        if cmds_event_types != event_types:
-            raise ValueError(f"Expected {event_types} but got {cmds_event_types}")
+    for cmd in cmds_perigee:
+        t_perigee = cmd["time"]
+        ok = (states["tstart"] <= t_perigee) & (t_perigee < states["tstop"])
+        n_ok = np.count_nonzero(ok)
+        if n_ok == 0:
+            LOGGER.warning(
+                "WARNING: No ER observations found covering perigee at"
+                f" {CxoTime(t_perigee).date}"
+            )
+            continue
+        elif n_ok > 1:
+            raise ValueError(
+                "Found multiple states covering perigee at"
+                f" {CxoTime(t_perigee).date} (this really should not happen, this must"
+                " be a bug"
+            )
+
+        t_rad_entry = max(states["tstart"][ok][0], t_perigee - 20000)
+        t_rad_exit = min(states["tstop"][ok][0], t_perigee + 20000)
 
         event = EventPerigee(
-            rad_entry=cmd0["date"], perigee=cmd1["date"], rad_exit=cmd2["date"]
+            rad_entry=t_rad_entry,
+            perigee=cmd["date"],
+            rad_exit=t_rad_exit,
         )
+
         if event.tlm is not None:
             events.append(event)
         else:
-            break
+            LOGGER.info(f"No TLM found for perigee event at {event.perigee}, breaking")
+            continue
 
     LOGGER.info(f"Found {len(events)} perigee events")
 
@@ -246,27 +268,50 @@ def make_index_list_pages(opt, stats_new: Table, stats_all: Table) -> None:
     template = Template(INDEX_LIST_PATH().read_text())
 
     # Write index page for last 90 days of perigee data
-    ok = CxoTime.now() - CxoTime(stats_all["perigee"]) < 90 * u.day
+    ok = CxoTime(stats_all["perigee"][0]) - CxoTime(stats_all["perigee"]) < 90 * u.day
     stats_recent = stats_all[ok]
     path = PERIGEES_DIR_PATH(opt.data_dir) / "index.html"
     make_index_list_page(
         path,
         template,
         stats_recent,
-        years=np.unique(years_all),
+        years=reversed(sorted(set(years_all))),
         description="last 90 days",
     )
 
-    # Write index page for each calendar year which is in stats_new
-    for year in np.unique(years_new):
+    # Write index page for the last two calendar years
+    years_unique = sorted(np.unique(years_all))
+    for year in years_unique[-2:]:
         ok = years_all == year
         stats_year = stats_all[ok]
+        # Strip out the year/ from dirname since we are already in the year/ dir
+        stats_year["dirname"] = [dirname[5:] for dirname in stats_year["dirname"]]
         path = PERIGEES_DIR_PATH(opt.data_dir) / str(year) / "index.html"
         path.parent.mkdir(parents=True, exist_ok=True)
-        make_index_list_page(path, template, stats_year, description=f"year {year}")
+        prev = f"../{year - 1}" if (year - 1) in years_unique else None
+        index = f"../"
+        next = f"../{year + 1}" if (year + 1) in years_unique else None
+        make_index_list_page(
+            path,
+            template,
+            stats_year,
+            prev=prev,
+            index=index,
+            next=next,
+            description=f"{year}",
+        )
 
 
-def make_index_list_page(path, template, stats, years=None, description=None):
+def make_index_list_page(
+    path,
+    template,
+    stats,
+    years=None,
+    description=None,
+    prev=None,
+    index=None,
+    next=None,
+):
     # Replace all zeros with "" for the HTML table
     context_stats = []
     for row in stats:
@@ -276,7 +321,12 @@ def make_index_list_page(path, template, stats, years=None, description=None):
         context_stats.append(context_row)
 
     html = template.render(
-        kalman_stats=context_stats, description=description, years=years
+        kalman_stats=context_stats,
+        description=description,
+        years=years,
+        prev=prev,
+        index=index,
+        next=next,
     )
     LOGGER.info(f"Writing index list page for {description} to {path}")
     path.write_text(html)
@@ -352,6 +402,7 @@ class EventPerigee:
             "aoacrpt",
             "aoacfct*",
         ]
+        LOGGER.info(f"Getting telemetry for {self.perigee}")
         tlm = MSIDset(msids, self.rad_entry, self.rad_exit)
         if (
             len(tlm["aokalstr"]) == 0
