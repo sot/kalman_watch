@@ -20,10 +20,11 @@ from cxotime import CxoTime
 from jinja2 import Template
 from kadi.commands import get_observations
 from kadi.commands.commands_v2 import get_cmds
+from kadi.commands.states import get_states, reduce_states
 from plotly.subplots import make_subplots
 from ska_helpers.logging import basic_logger
+import plotly.express as px
 
-from kadi.commands.states import get_states, reduce_states
 from kalman_watch import __version__
 
 LOGGER = basic_logger(__name__, level="INFO")
@@ -262,7 +263,6 @@ def get_stats(evts_perigee) -> Table:
 
 
 def make_index_list_pages(opt, stats_new: Table, stats_all: Table) -> None:
-    years_new = CxoTime(stats_new["perigee"]).ymdhms.year
     years_all = CxoTime(stats_all["perigee"]).ymdhms.year
 
     template = Template(INDEX_LIST_PATH().read_text())
@@ -395,12 +395,12 @@ class EventPerigee:
         """
         msids = [
             "aokalstr",
-            "aonstars",
             "aopcadmd",
             "aoacaseq",
             "aoaciir*",
             "aoacrpt",
             "aoacfct*",
+            "aoatter*",
         ]
         LOGGER.info(f"Getting telemetry for {self.perigee}")
         tlm = MSIDset(msids, self.rad_entry, self.rad_exit)
@@ -410,8 +410,7 @@ class EventPerigee:
         ):
             return None
 
-        for msid in ["aokalstr", "aonstars"]:
-            tlm[msid].vals = tlm[msid].vals.astype(np.float64)
+        tlm["aokalstr"].vals = tlm["aokalstr"].vals.astype(np.float64)
 
         # Reduce everything to the first ACA values during NPNT/KALM
         ok = tlm["aoacrpt"].vals == "0 "
@@ -419,13 +418,14 @@ class EventPerigee:
             times=tlm["aokalstr"].times[ok], bad_union=False, filter_bad=False
         )
 
-        for msid in ["aokalstr", "aonstars"]:
-            bad = (
-                (tlm["aopcadmd"].vals != "NPNT")
-                | (tlm["aoacaseq"].vals != "KALM")
-                | tlm[msid].bads
-            )
-            tlm[msid].vals[bad] = np.nan
+        bad = (
+            (tlm["aopcadmd"].vals != "NPNT")
+            | (tlm["aoacaseq"].vals != "KALM")
+            | tlm["aokalstr"].bads
+        )
+        tlm["aokalstr"].vals[bad] = np.nan
+        for axis in range(1, 4):
+            tlm[f"aoatter{axis}"].vals[bad] = np.nan
 
         tlm.perigee_times = tlm.times - self.perigee.cxcsec
 
@@ -518,16 +518,18 @@ class EventPerigee:
         date_perigee = self.perigee.date[:-4]
 
         perigee_times = self.tlm.perigee_times
-        perigee_times = perigee_times.round(2)
+        perigee_times = perigee_times.round(1)
         aokalstr = self.tlm["aokalstr"].vals.astype(float)
 
         fig = make_subplots(
-            rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.1
+            rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.1
         )  # type: pgo.FigureWidget
+
         for obs, color in zip(self.obss, cycle(COLOR_CYCLE)):
             obs_tstart_rel = CxoTime(obs["obs_start"]).secs - self.perigee.cxcsec
             obs_tstop_rel = CxoTime(obs["obs_stop"]).secs - self.perigee.cxcsec
             i0, i1 = np.searchsorted(perigee_times, [obs_tstart_rel, obs_tstop_rel])
+
             obs_times = perigee_times[i0:i1]
             fig.add_trace(
                 pgo.Scatter(
@@ -542,87 +544,116 @@ class EventPerigee:
                 col=1,
             )
 
-            # Ionizing radiation flag
-            xs = []
-            ys = []
-            for slot in range(8):
-                bad = (
-                    (self.tlm[f"aoaciir{slot}"].vals[i0:i1] == "ERR")
-                    & (self.tlm[f"aoacfct{slot}"].vals[i0:i1] == "TRAK")
-                    & (self.tlm["aopcadmd"].vals[i0:i1] == "NPNT")
-                    & (self.tlm["aoacaseq"].vals[i0:i1] == "KALM")
-                )
-
-                x = obs_times[bad]
-                xs.append(x)
-                ys.append(np.full_like(x, fill_value=slot).astype(int))
-            x = np.concatenate(xs)
-            y = np.concatenate(ys)
-            trace = pgo.Scatter(
-                x=x,
-                y=y,
-                hoverinfo="text",
-                mode="markers",
-                line={"color": "#1f77b4"},  # muted blue
-                showlegend=False,
-                marker={"opacity": 0.75, "size": 5},
-                text=f'Obsid {obs["obsid"]}',
-            )
+            trace = self.get_ionizing_rad_trace(obs, i0, i1, obs_times)
             fig.add_trace(trace, row=2, col=1)
 
-            # Not tracking
-            xs = []
-            ys = []
-            for slot in range(8):
-                bad = (
-                    (self.tlm[f"aoacfct{slot}"].vals[i0:i1] != "TRAK")
-                    & (self.tlm["aopcadmd"].vals[i0:i1] == "NPNT")
-                    & (self.tlm["aoacaseq"].vals[i0:i1] == "KALM")
-                )
-
-                x = obs_times[bad]
-                xs.append(x)
-                ys.append(np.full_like(x, fill_value=slot).astype(int))
-            x = np.concatenate(xs)
-            y = np.concatenate(ys)
-            trace = pgo.Scatter(
-                x=x,
-                y=y,
-                hoverinfo="text",
-                mode="markers",
-                line={"color": "#d62728"},
-                showlegend=False,
-                marker={"opacity": 0.75, "size": 5},
-                marker_symbol="x",
-                text=f'Obsid {obs["obsid"]}',
-            )
+            trace = self.get_no_tracking_trace(obs, i0, i1, obs_times)
             fig.add_trace(trace, row=2, col=1)
 
         for low_kalman in self.low_kalmans:
-            p0 = low_kalman["tstart_rel"]
-            p1 = low_kalman["tstop_rel"]
-            n_kalstr = low_kalman["n_kalstr"]
+            trace = self.get_low_kalman_trace(low_kalman)
+            fig.add_trace(trace, row=1, col=1)
 
-            fig.add_trace(
-                pgo.Scatter(
-                    x=[p0, p1],
-                    y=[n_kalstr, n_kalstr],
-                    marker={"opacity": 0.5},
-                    line={"color": "red", "width": 3},
-                    text=f"<= {n_kalstr} stars for {p1-p0:.1f} sec",
-                    hoverinfo="text",
-                    showlegend=False,
-                ),
-                row=1,
-                col=1,
-            )
+        for axis in range(1, 4):
+            trace = self.get_attitude_error_trace(perigee_times, axis)
+            fig.add_trace(trace, row=3, col=1)
 
         # fig.update(layout=layout, row=2, col=1)
         fig.update_yaxes(range=[-0.5, 8.5], row=1, col=1, title_text="AOKALSTR")
         fig.update_yaxes(range=[-0.5, 8.5], row=2, col=1, title_text="Slot")
+        fig.update_yaxes(row=3, col=1, title_text="Att Err (arcsec)")
         fig.update_xaxes(title_text=f"Time relative to {date_perigee}", row=2, col=1)
 
         return fig
+
+    def get_attitude_error_trace(self, times, axis):
+        y = np.rad2deg(self.tlm[f"aoatter{axis}"].vals) * 3600
+        y = y.round(1)
+        trace = pgo.Scatter(
+            # Subsample to reduce file size since this does not vary quickly
+            x=times[::8],
+            y=y[::8],
+            line={"color": px.colors.qualitative.Plotly[axis]},
+            name=f"AOATTER{axis}",
+        )
+        return trace
+
+    def get_low_kalman_trace(self, low_kalman):
+        p0 = low_kalman["tstart_rel"]
+        p1 = low_kalman["tstop_rel"]
+        n_kalstr = low_kalman["n_kalstr"]
+
+        trace = pgo.Scatter(
+            x=[p0, p1],
+            y=[n_kalstr, n_kalstr],
+            marker={"opacity": 0.5},
+            line={"color": "red", "width": 3},
+            text=f"<= {n_kalstr} stars for {p1-p0:.1f} sec",
+            hoverinfo="text",
+            showlegend=False,
+        )
+
+        return trace
+
+    def get_no_tracking_trace(self, obs, i0, i1, obs_times):
+        # Not tracking
+        xs = []
+        ys = []
+        for slot in range(8):
+            bad = (
+                (self.tlm[f"aoacfct{slot}"].vals[i0:i1] != "TRAK")
+                & (self.tlm["aopcadmd"].vals[i0:i1] == "NPNT")
+                & (self.tlm["aoacaseq"].vals[i0:i1] == "KALM")
+            )
+
+            x = obs_times[bad]
+            xs.append(x)
+            ys.append(np.full_like(x, fill_value=slot).astype(int))
+        x = np.concatenate(xs)
+        y = np.concatenate(ys)
+        trace = pgo.Scatter(
+            x=x,
+            y=y,
+            hoverinfo="text",
+            mode="markers",
+            line={"color": "#d62728"},
+            showlegend=False,
+            marker={"opacity": 0.75, "size": 5},
+            marker_symbol="x",
+            text=f'Obsid {obs["obsid"]}',
+        )
+
+        return trace
+
+    def get_ionizing_rad_trace(self, obs, i0, i1, obs_times):
+        # Ionizing radiation flag
+        xs = []
+        ys = []
+        for slot in range(8):
+            bad = (
+                (self.tlm[f"aoaciir{slot}"].vals[i0:i1] == "ERR")
+                & (self.tlm[f"aoacfct{slot}"].vals[i0:i1] == "TRAK")
+                & (self.tlm["aopcadmd"].vals[i0:i1] == "NPNT")
+                & (self.tlm["aoacaseq"].vals[i0:i1] == "KALM")
+            )
+
+            x = obs_times[bad]
+            xs.append(x)
+            ys.append(np.full_like(x, fill_value=slot).astype(int))
+        x = np.concatenate(xs)
+        y = np.concatenate(ys)
+        trace = pgo.Scatter(
+            x=x,
+            y=y,
+            hoverinfo="text",
+            mode="markers",
+            line={"color": "#1f77b4"},  # muted blue
+            showlegend=False,
+            marker={"opacity": 0.75, "size": 5},
+            text=f'Obsid {obs["obsid"]}',
+        )
+
+        return trace
 
 
 # if __name__ == "__main__":
