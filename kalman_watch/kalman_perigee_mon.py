@@ -11,6 +11,7 @@ from typing import List, Union
 
 import astropy.units as u
 import numpy as np
+import plotly.express as px
 import plotly.graph_objects as pgo
 from acdc.common import send_mail
 from astropy.table import Table, vstack
@@ -23,7 +24,7 @@ from kadi.commands.commands_v2 import get_cmds
 from kadi.commands.states import get_states, reduce_states
 from plotly.subplots import make_subplots
 from ska_helpers.logging import basic_logger
-import plotly.express as px
+from ska_helpers.run_info import log_run_info
 
 from kalman_watch import __version__
 
@@ -106,6 +107,7 @@ def get_opt(sys_args):
 
 def main(sys_args=None):
     opt = get_opt(sys_args)
+    log_run_info(LOGGER.info, opt, version=__version__)
 
     stop = CxoTime(opt.stop)
 
@@ -144,6 +146,14 @@ def main(sys_args=None):
     path = EVT_PERIGEE_DATA_PATH(opt.data_dir)
     LOGGER.info(f"Writing perigee data {path}")
     stats_all.write(path, format="ascii.ecsv", overwrite=True)
+
+    # Check for any low kalman intervals in the new events. The first event is
+    # normally a repeat so don't email on that one.
+    has_low_kalmans = any(
+        len(evt_perigee.low_kalmans) > 0 for evt_perigee in evts_perigee[1:]
+    )
+    if opt.emails and has_low_kalmans:
+        send_process_mail(opt, evts_perigee)
 
 
 def read_kalman_stats(opt) -> Table:
@@ -217,7 +227,7 @@ def get_evts_perigee(
         if event.tlm is not None:
             events.append(event)
         else:
-            LOGGER.info(f"No TLM found for perigee event at {event.perigee}, breaking")
+            LOGGER.info(f"No TLM found for perigee event at {event.perigee}, skipping")
             continue
 
     LOGGER.info(f"Found {len(events)} perigee events")
@@ -332,9 +342,13 @@ def make_index_list_page(
     path.write_text(html)
 
 
-def send_process_mail(opt):
+def send_process_mail(opt, evts_perigee):
     subject = f"kalman_watch: long drop interval(s)"
-    text = "FIGURE IT OUT!"
+    lines = ["Long drop interval(s) found for the following perigee events:"]
+    for evt in evts_perigee:
+        if len(evt.low_kalmans) > 0:
+            lines.append(f"{evt.dirname} {evt.perigee.date}")
+    text = "\n".join(lines)
     send_mail(LOGGER, opt, subject, text, __file__)
 
 

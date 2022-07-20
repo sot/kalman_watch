@@ -20,6 +20,7 @@ setup(
     author_email="taldcroft@cfa.harvard.edu",
     url="https://sot.github.io/kalman_watch",
     packages=["kalman_watch"],
+    package_data={"kalman_watch": ["*.html", "task_schedule.cfg"]},
     tests_require=["pytest"],
     use_scm_version=True,
     setup_requires=["setuptools_scm", "setuptools_scm_git_archive"],
