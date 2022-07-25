@@ -116,48 +116,44 @@ def main(sys_args=None):
 
     stats_prev = read_kalman_stats(opt)
     if len(stats_prev) > 0:
-        # If there are previous events then back up to get the most recent one
-        # again. This is to reprocess and potentially fill in the "next" link in the
-        # detail HTML page.
-        start = CxoTime(stats_prev[0]["perigee"]) - 1 * u.day
+        # Start from one day after last existing perigee (orbit is ~2.5 days)
+        start = CxoTime(stats_prev["perigee"][0]) + 1 * u.day
     else:
         # Get a few perigees to start the history
         start = stop - 10 * u.day
 
-    # Get date of the previous perigee for the most recent event in stats_prev.
-    # This is essentially the continuity.
-    evt_last_date_prev = (
-        None if len(stats_prev) < 2 else CxoTime(stats_prev[1]["perigee"])
-    )
-    evts_perigee = get_evts_perigee(start, stop, evt_last_date_prev)
+    evts_perigee = get_evts_perigee(start, stop)
 
     # Bail out if there are no new perigee events. Since we backed up to the
     # previous perigee we need at least two perigee events.
-    if len(evts_perigee) < 2:
+    if len(evts_perigee) == 0:
         LOGGER.info("No new perigee events")
         return
 
     for evt_perigee in evts_perigee:
-        evt_perigee.make_detail_page(opt)
         evt_perigee.write_data(opt)
 
     stats_new = get_stats(evts_perigee)
-    # Combine new and prev, dropping the first prev entry since it is a repeat
-    stats_all = vstack([stats_new, stats_prev[1:]])
-
-    make_index_list_pages(opt, stats_new, stats_all)
+    # Combine new and previous statistics summary
+    stats_all = vstack([stats_new, stats_prev])
 
     path = PERIGEES_INDEX_TABLE_PATH(opt.data_dir)
     LOGGER.info(f"Writing perigee data {path}")
     stats_all.write(path, format="ascii.ecsv", overwrite=True)
 
-    # Check for any low kalman intervals in the new events. The first event is
-    # normally a repeat so don't email on that one.
+    # Check for any low kalman intervals in the new events.
     has_low_kalmans = any(
-        len(evt_perigee.low_kalmans) > 0 for evt_perigee in evts_perigee[1:]
+        len(evt_perigee.low_kalmans) > 0 for evt_perigee in evts_perigee
     )
     if opt.emails and has_low_kalmans:
         send_process_mail(opt, evts_perigee)
+
+    # Data collection and alerts are done. Now generate the web pages. This can
+    # be done dynamically using kadi web apps.
+    for evt_perigee in evts_perigee:
+        evt_perigee.make_detail_page(opt)
+
+    make_index_list_pages(opt, stats_all)
 
 
 def read_kalman_stats(opt) -> Table:
@@ -171,9 +167,7 @@ def read_kalman_stats(opt) -> Table:
     return kalman_stats
 
 
-def get_evts_perigee(
-    start: CxoTime, stop: CxoTime, evt_last_date_prev: CxoTime
-) -> List["EventPerigee"]:
+def get_evts_perigee(start: CxoTime, stop: CxoTime) -> List["EventPerigee"]:
     """
     Get the perigee events within start/stop.
 
@@ -187,10 +181,7 @@ def get_evts_perigee(
     :returns: list of PerigeeEvent
         List of PerigeeEvent objects
     """
-    LOGGER.info(
-        f"Getting perigee events between {start} and {stop} with"
-        f" evt_last_date_prev={evt_last_date_prev}"
-    )
+    LOGGER.info(f"Getting perigee events between {start} and {stop}")
     # event_types = ["EEF1000", "EPERIGEE", "XEF1000"]
     cmds_perigee = get_cmds(
         start=start, stop=stop, type="ORBPOINT", event_type="EPERIGEE"
@@ -235,16 +226,6 @@ def get_evts_perigee(
             continue
 
     LOGGER.info(f"Found {len(events)} perigee events")
-
-    for evt_prev, evt, evt_next in zip(
-        [None] + events[:-1], events, events[1:] + [None]
-    ):
-        evt.prev_date = None if evt_prev is None else evt_prev.perigee
-        evt.next_date = None if evt_next is None else evt_next.perigee
-
-    if evt_last_date_prev is not None:
-        events[0].prev_date = evt_last_date_prev
-
     return events
 
 
@@ -277,6 +258,46 @@ def get_stats(evts_perigee) -> Table:
 
 
 def make_index_list_pages(opt, stats_all: Table) -> None:
+    html = get_index_html_recent(stats_all)
+    path = PERIGEES_DIR_PATH(opt.data_dir) / "index.html"
+    LOGGER.info(f"Writing recent index list page to {path}")
+    path.write_text(html)
+
+    # Write index page for the last two calendar years
+    years_all = CxoTime(stats_all["perigee"]).ymdhms.year
+    years_unique = sorted(np.unique(years_all))
+    for year in years_unique[-2:]:
+        html = get_index_html_year(stats_all, year)
+        path = PERIGEES_DIR_PATH(opt.data_dir) / str(year) / "index.html"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        LOGGER.info(f"Writing index list page for {year} to {path}")
+        path.write_text(html)
+
+
+def get_index_html_year(stats_all, year):
+    years_all = CxoTime(stats_all["perigee"]).ymdhms.year
+    years_unique = sorted(np.unique(years_all))
+    template = Template(INDEX_LIST_PATH().read_text())
+    ok = years_all == year
+    stats_year = stats_all[ok]
+    # Strip out the year/ from dirname since we are already in the year/ dir
+    stats_year["dirname"] = [dirname[5:] for dirname in stats_year["dirname"]]
+    prev = f"../{year - 1}" if (year - 1) in years_unique else None
+    index = f"../"
+    next = f"../{year + 1}" if (year + 1) in years_unique else None
+    description = f"{year}"
+    html = get_index_list_page(
+        template,
+        stats_year,
+        prev=prev,
+        index=index,
+        next=next,
+        description=description,
+    )
+    return html
+
+
+def get_index_html_recent(stats_all):
     years_all = CxoTime(stats_all["perigee"]).ymdhms.year
 
     template = Template(INDEX_LIST_PATH().read_text())
@@ -284,40 +305,17 @@ def make_index_list_pages(opt, stats_all: Table) -> None:
     # Write index page for last 90 days of perigee data
     ok = CxoTime(stats_all["perigee"][0]) - CxoTime(stats_all["perigee"]) < 90 * u.day
     stats_recent = stats_all[ok]
-    path = PERIGEES_DIR_PATH(opt.data_dir) / "index.html"
-    make_index_list_page(
-        path,
+    description = "last 90 days"
+    html = get_index_list_page(
         template,
         stats_recent,
         years=reversed(sorted(set(years_all))),
-        description="last 90 days",
+        description=description,
     )
-
-    # Write index page for the last two calendar years
-    years_unique = sorted(np.unique(years_all))
-    for year in years_unique[-2:]:
-        ok = years_all == year
-        stats_year = stats_all[ok]
-        # Strip out the year/ from dirname since we are already in the year/ dir
-        stats_year["dirname"] = [dirname[5:] for dirname in stats_year["dirname"]]
-        path = PERIGEES_DIR_PATH(opt.data_dir) / str(year) / "index.html"
-        path.parent.mkdir(parents=True, exist_ok=True)
-        prev = f"../{year - 1}" if (year - 1) in years_unique else None
-        index = f"../"
-        next = f"../{year + 1}" if (year + 1) in years_unique else None
-        make_index_list_page(
-            path,
-            template,
-            stats_year,
-            prev=prev,
-            index=index,
-            next=next,
-            description=f"{year}",
-        )
+    return html
 
 
-def make_index_list_page(
-    path,
+def get_index_list_page(
     template,
     stats,
     years=None,
@@ -342,8 +340,7 @@ def make_index_list_page(
         index=index,
         next=next,
     )
-    LOGGER.info(f"Writing index list page for {description} to {path}")
-    path.write_text(html)
+    return html
 
 
 def send_process_mail(opt, evts_perigee):
