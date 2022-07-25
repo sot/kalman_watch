@@ -37,8 +37,12 @@ def PERIGEES_DIR_PATH(data_dir: str) -> Path:
     return Path(data_dir) / "perigees"
 
 
-def EVT_PERIGEE_DATA_PATH(data_dir: str) -> Path:
+def PERIGEES_INDEX_TABLE_PATH(data_dir: str) -> Path:
     return PERIGEES_DIR_PATH(data_dir) / "kalman_perigees.ecsv"
+
+
+def EVT_PERIGEE_DATA_PATH(data_dir: str, evt: "EventPerigee") -> Path:
+    return EVT_PERIGEE_DIR_PATH(data_dir, evt) / "data.npz"
 
 
 def EVT_PERIGEE_DIR_PATH(data_dir: str, evt: "EventPerigee"):
@@ -135,6 +139,7 @@ def main(sys_args=None):
 
     for evt_perigee in evts_perigee:
         evt_perigee.make_detail_page(opt)
+        evt_perigee.write_data(opt)
 
     stats_new = get_stats(evts_perigee)
     # Combine new and prev, dropping the first prev entry since it is a repeat
@@ -142,7 +147,7 @@ def main(sys_args=None):
 
     make_index_list_pages(opt, stats_new, stats_all)
 
-    path = EVT_PERIGEE_DATA_PATH(opt.data_dir)
+    path = PERIGEES_INDEX_TABLE_PATH(opt.data_dir)
     LOGGER.info(f"Writing perigee data {path}")
     stats_all.write(path, format="ascii.ecsv", overwrite=True)
 
@@ -156,7 +161,7 @@ def main(sys_args=None):
 
 
 def read_kalman_stats(opt) -> Table:
-    path = EVT_PERIGEE_DATA_PATH(opt.data_dir)
+    path = PERIGEES_INDEX_TABLE_PATH(opt.data_dir)
     if path.exists():
         LOGGER.info(f"Reading kalman perigee data from {path}")
         kalman_stats = Table.read(path)
@@ -271,7 +276,7 @@ def get_stats(evts_perigee) -> Table:
     return out
 
 
-def make_index_list_pages(opt, stats_new: Table, stats_all: Table) -> None:
+def make_index_list_pages(opt, stats_all: Table) -> None:
     years_all = CxoTime(stats_all["perigee"]).ymdhms.year
 
     template = Template(INDEX_LIST_PATH().read_text())
@@ -361,6 +366,16 @@ class EventPerigee:
         self.prev_date = None
         self.next_date = None
 
+    @classmethod
+    def from_npz(cls, path):
+        LOGGER.info(f"Loading perigee event from {path}")
+        with np.load(path) as npz_data:
+            data = dict(npz_data)
+        obj = cls(data["rad_entry"], data["perigee"], data["rad_exit"])
+        obj._data = data
+        obj._obss = Table(data["obss"])
+        return obj
+
     def __repr__(self):
         return (
             f"EventPerigee(rad_entry={self.rad_entry.date!r},"
@@ -375,7 +390,9 @@ class EventPerigee:
     @property
     def obss(self):
         if not hasattr(self, "_obss"):
-            self._obss = get_observations(start=self.rad_entry, stop=self.rad_exit)
+            LOGGER.info(f"Getting observations from kadi commands for {self.dirname}")
+            obss = get_observations(start=self.rad_entry, stop=self.rad_exit)
+            self._obss = Table(obss)
         return self._obss
 
     @property
@@ -439,6 +456,7 @@ class EventPerigee:
 
         :returns: dict of data
         """
+        LOGGER.debug(f"Setting data property for {self.dirname}")
         data = {}
         for axis in range(1, 4):
             data[f"aoatter{axis}"] = self.tlm[f"aoatter{axis}"].vals
@@ -451,8 +469,18 @@ class EventPerigee:
             data[f"aoaciir{slot}"] = self.tlm[f"aoaciir{slot}"].vals
         data["times"] = self.tlm["aokalstr"].times
         data["perigee_times"] = self.tlm.perigee_times
+        data["perigee"] = self.perigee.date
+        data["rad_entry"] = self.rad_entry.date
+        data["rad_exit"] = self.rad_exit.date
+        data["obss"] = self.obss.as_array()
 
         return data
+
+    def write_data(self, opt):
+        path = EVT_PERIGEE_DATA_PATH(opt.data_dir, self)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        LOGGER.info(f"Writing perigee data to {path}")
+        np.savez(path, **self.data)
 
     @property
     def low_kalmans(self):
@@ -535,12 +563,14 @@ class EventPerigee:
 
         dirname_path = EVT_PERIGEE_DIR_PATH(opt.data_dir, self)
         dirname_path.mkdir(parents=True, exist_ok=True)
-        (dirname_path / "index.html").write_text(html)
+        path = dirname_path / "index.html"
+        LOGGER.info(f"Writing perigee detail page to {path}")
+        path.write_text(html)
 
     def get_plot_fig(self) -> pgo.FigureWidget:
         date_perigee = self.perigee.date[:-4]
 
-        perigee_times = self.tlm.perigee_times
+        perigee_times = self.data["perigee_times"]
         perigee_times = perigee_times.round(1)
         aokalstr = self.data["aokalstr"]
 
