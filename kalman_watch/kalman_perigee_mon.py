@@ -446,6 +446,33 @@ class EventPerigee:
         return tlm
 
     @property
+    def data(self):
+        """Get data for processing perigee"""
+        if not hasattr(self, "_data"):
+            self._data = self._get_data()
+        return self._data
+
+    def _get_data(self) -> dict:
+        """Get data for processing perigee for Kalman
+
+        :returns: dict of data
+        """
+        data = {}
+        for axis in range(1, 4):
+            data[f"aoatter{axis}"] = self.tlm[f"aoatter{axis}"].vals
+        data["aokalstr"] = self.tlm["aokalstr"].vals
+        data["aopcadmd"] = self.tlm["aopcadmd"].vals
+        data["aoacaseq"] = self.tlm["aoacaseq"].vals
+        data["aoacrpt"] = self.tlm["aoacrpt"].vals
+        for slot in range(8):
+            data[f"aoacfct{slot}"] = self.tlm[f"aoacfct{slot}"].vals
+            data[f"aoaciir{slot}"] = self.tlm[f"aoaciir{slot}"].vals
+        data["times"] = self.tlm["aokalstr"].times
+        data["perigee_times"] = self.tlm.perigee_times
+
+        return data
+
+    @property
     def low_kalmans(self):
         if not hasattr(self, "_low_kalmans"):
             self._low_kalmans = self._get_low_kalmans()
@@ -454,9 +481,9 @@ class EventPerigee:
     def _get_low_kalmans(self) -> Table:
         rows = []
         for n_kalstr, dur_limit in KALMAN_LIMITS:
-            vals = self.tlm["aokalstr"].vals.copy()
+            vals = self.data["aokalstr"].copy()
             vals[np.isnan(vals)] = 10
-            ints_low = logical_intervals(self.tlm["aokalstr"].times, vals <= n_kalstr)
+            ints_low = logical_intervals(self.data["times"], vals <= n_kalstr)
             ints_low = ints_low[ints_low["duration"] > dur_limit]
 
             for int_low in ints_low:
@@ -533,7 +560,7 @@ class EventPerigee:
 
         perigee_times = self.tlm.perigee_times
         perigee_times = perigee_times.round(1)
-        aokalstr = self.tlm["aokalstr"].vals.astype(float)
+        aokalstr = self.data["aokalstr"]
 
         fig = make_subplots(
             rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.1
@@ -581,7 +608,7 @@ class EventPerigee:
         return fig
 
     def get_attitude_error_trace(self, times, axis):
-        y = np.rad2deg(self.tlm[f"aoatter{axis}"].vals) * 3600
+        y = np.rad2deg(self.data[f"aoatter{axis}"]) * 3600
         y = y.round(1)
         trace = pgo.Scatter(
             # Subsample to reduce file size since this does not vary quickly
@@ -615,9 +642,9 @@ class EventPerigee:
         ys = []
         for slot in range(8):
             bad = (
-                (self.tlm[f"aoacfct{slot}"].vals[i0:i1] != "TRAK")
-                & (self.tlm["aopcadmd"].vals[i0:i1] == "NPNT")
-                & (self.tlm["aoacaseq"].vals[i0:i1] == "KALM")
+                (self.data[f"aoacfct{slot}"][i0:i1] != "TRAK")
+                & (self.data["aopcadmd"][i0:i1] == "NPNT")
+                & (self.data["aoacaseq"][i0:i1] == "KALM")
             )
 
             x = obs_times[bad]
@@ -645,10 +672,10 @@ class EventPerigee:
         ys = []
         for slot in range(8):
             bad = (
-                (self.tlm[f"aoaciir{slot}"].vals[i0:i1] == "ERR")
-                & (self.tlm[f"aoacfct{slot}"].vals[i0:i1] == "TRAK")
-                & (self.tlm["aopcadmd"].vals[i0:i1] == "NPNT")
-                & (self.tlm["aoacaseq"].vals[i0:i1] == "KALM")
+                (self.data[f"aoaciir{slot}"][i0:i1] == "ERR")
+                & (self.data[f"aoacfct{slot}"][i0:i1] == "TRAK")
+                & (self.data["aopcadmd"][i0:i1] == "NPNT")
+                & (self.data["aoacaseq"][i0:i1] == "KALM")
             )
 
             x = obs_times[bad]
@@ -671,4 +698,6 @@ class EventPerigee:
 
 
 if __name__ == "__main__":
-    main()
+    import os
+    if 'PERIGEE_MON_PLAY' not in os.environ:
+        main()
