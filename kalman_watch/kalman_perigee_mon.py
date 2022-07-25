@@ -354,14 +354,12 @@ def send_process_mail(opt, evts_perigee):
 class EventPerigee:
     """Class for tracking Kalman star data through perigee."""
 
-    def __init__(
-        self, rad_entry, perigee, rad_exit, prev_date: str = None, next_date: str = None
-    ):
+    def __init__(self, rad_entry, perigee, rad_exit):
         self.rad_entry = CxoTime(rad_entry)
         self.perigee = CxoTime(perigee)
         self.rad_exit = CxoTime(rad_exit)
-        self.prev_date = prev_date
-        self.next_date = next_date
+        self.prev_date = None
+        self.next_date = None
 
     def __repr__(self):
         return (
