@@ -4,7 +4,6 @@
 
 import argparse
 import calendar
-from dataclasses import dataclass
 from itertools import cycle
 from pathlib import Path
 from typing import List, Union
@@ -352,32 +351,17 @@ def send_process_mail(opt, evts_perigee):
     send_mail(LOGGER, opt, subject, text, __file__)
 
 
-class CxoTimeField:
-    def __init__(self, *, default=None):
-        self._default = default
-
-    def __set_name__(self, owner, name):
-        self._name = "_" + name
-
-    def __get__(self, obj, type):
-        if obj is None:
-            return self._default
-
-        return getattr(obj, self._name, self._default)
-
-    def __set__(self, obj, value):
-        setattr(obj, self._name, CxoTime(value))
-
-
-@dataclass
 class EventPerigee:
     """Class for tracking Kalman star data through perigee."""
 
-    rad_entry: CxoTimeField = CxoTimeField()
-    perigee: CxoTimeField = CxoTimeField()
-    rad_exit: CxoTimeField = CxoTimeField()
-    prev_date: str = ""
-    next_date: str = ""
+    def __init__(
+        self, rad_entry, perigee, rad_exit, prev_date: str = None, next_date: str = None
+    ):
+        self.rad_entry = CxoTime(rad_entry)
+        self.perigee = CxoTime(perigee)
+        self.rad_exit = CxoTime(rad_exit)
+        self.prev_date = prev_date
+        self.next_date = next_date
 
     def __repr__(self):
         return (
@@ -699,5 +683,6 @@ class EventPerigee:
 
 if __name__ == "__main__":
     import os
-    if 'PERIGEE_MON_PLAY' not in os.environ:
+
+    if "PERIGEE_MON_DEVELOP" not in os.environ:
         main()
