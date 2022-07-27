@@ -4,6 +4,8 @@
 
 import argparse
 import calendar
+import json
+import re
 from itertools import cycle
 from pathlib import Path
 from typing import List, Union
@@ -46,6 +48,10 @@ def PERIGEES_INDEX_TABLE_PATH(data_dir: str) -> Path:
 
 def EVT_PERIGEE_DATA_PATH(data_dir: str, evt: "EventPerigee") -> Path:
     return EVT_PERIGEE_DIR_PATH(data_dir, evt) / "data.npz"
+
+
+def EVT_PERIGEE_INFO_PATH(data_dir: str, evt: "EventPerigee") -> Path:
+    return EVT_PERIGEE_DIR_PATH(data_dir, evt) / "info.json"
 
 
 def EVT_PERIGEE_DIR_PATH(data_dir: str, evt: "EventPerigee"):
@@ -99,6 +105,9 @@ def get_opt(sys_args):
         description="Kalman star watch {}".format(__version__)
     )
     parser.add_argument("--stop", type=str, help="Stop date (default=NOW)")
+    parser.add_argument(
+        "--lookback", type=float, default=14, help="Lookback time (days, default=14)"
+    )
     parser.add_argument("--data-dir", type=str, default=".", help="Data directory")
     parser.add_argument(
         "--email",
@@ -106,6 +115,9 @@ def get_opt(sys_args):
         dest="emails",
         default=[],
         help="Email address for notification",
+    )
+    parser.add_argument(
+        "--make-html", action="store_true", help="Make static HTML pages"
     )
     args = parser.parse_args(sys_args)
     return args
@@ -116,29 +128,25 @@ def main(sys_args=None):
     log_run_info(LOGGER.info, opt, version=__version__)
 
     stop = CxoTime(opt.stop)
+    start = stop - opt.lookback * u.day
 
     stats_prev = read_kalman_stats(opt)
-    if len(stats_prev) > 0:
-        # Start from one day after last existing perigee (orbit is ~2.5 days)
-        start = CxoTime(stats_prev["perigee"][0]) + 1 * u.day
-    else:
-        # Get a few perigees to start the history
-        start = stop - 10 * u.day
-
-    evts_perigee = get_evts_perigee(start, stop)
+    evts_perigee = get_evts_perigee(start, stop, stats_prev)
 
     # Bail out if there are no new perigee events. Since we backed up to the
     # previous perigee we need at least two perigee events.
     if len(evts_perigee) == 0:
-        LOGGER.info("No new perigee events")
+        LOGGER.info("No new perigee events, exiting")
         return
 
     for evt_perigee in evts_perigee:
         evt_perigee.write_data(opt)
+        evt_perigee.write_info(opt)
 
     stats_new = get_stats(evts_perigee)
     # Combine new and previous statistics summary
     stats_all = vstack([stats_new, stats_prev])
+    stats_all.sort("perigee", reverse=True)
 
     path = PERIGEES_INDEX_TABLE_PATH(opt.data_dir)
     LOGGER.info(f"Writing perigee data {path}")
@@ -151,26 +159,48 @@ def main(sys_args=None):
     if opt.emails and has_low_kalmans:
         send_process_mail(opt, evts_perigee)
 
-    # Data collection and alerts are done. Now generate the web pages. This can
-    # be done dynamically using kadi web apps.
-    for evt_perigee in evts_perigee:
-        evt_perigee.make_detail_page(opt)
+    if opt.make_html:
+        # Data collection and alerts are done. Now generate the web pages. This
+        # is mostly for testing. In production this is done dynamically using
+        # kadi web apps.
+        for evt_perigee in evts_perigee:
+            evt_perigee.make_detail_page(opt)
 
-    make_index_list_pages(opt, stats_all)
+        make_index_list_pages(opt, stats_all)
 
 
-def read_kalman_stats(opt) -> Table:
+def read_kalman_stats(opt, from_info=False) -> Table:
+    """Read kalman stats from file or from event info.json files.
+
+    If ``from_info`` is True, read all individual event info files instead of
+    the data file. This is also tried if the kalman stats file does not exist,
+    which allows re-generating the kalman stats file.
+    """
     path = PERIGEES_INDEX_TABLE_PATH(opt.data_dir)
-    if path.exists():
+    if path.exists() and not from_info:
         LOGGER.info(f"Reading kalman perigee data from {path}")
         kalman_stats = Table.read(path)
     else:
-        LOGGER.info(f"No kalman perigee data found at {path}, creating empty table")
-        kalman_stats = Table()
+        rows = []
+        # Look for files like 2019/Jan-12/info.json
+        for info_file in PERIGEES_DIR_PATH(opt.data_dir).glob("????/??????/info.json"):
+            if re.search(r"\d{4}/\w{3}-\d{2}/info\.json", info_file.as_posix()):
+                LOGGER.info(f"Reading kalman perigee data from {info_file}")
+                info = json.loads(info_file.read_text())
+                rows.append(info)
+
+        LOGGER.info(f"No kalman perigee stats data found at {path}")
+        LOGGER.info(f"Creating new table from {len(rows)} info files")
+        kalman_stats = Table(rows=rows)
+        if rows:
+            kalman_stats.sort("perigee", reverse=True)
+
     return kalman_stats
 
 
-def get_evts_perigee(start: CxoTime, stop: CxoTime) -> List["EventPerigee"]:
+def get_evts_perigee(
+    start: CxoTime, stop: CxoTime, stats_prev: Table
+) -> List["EventPerigee"]:
     """
     Get the perigee events within start/stop.
 
@@ -181,6 +211,8 @@ def get_evts_perigee(start: CxoTime, stop: CxoTime) -> List["EventPerigee"]:
         Start of date range
     :param stop: CxoTime
         End of date range
+    :param stats_prev: Table
+        Previous kalman stats table
     :returns: list of PerigeeEvent
         List of PerigeeEvent objects
     """
@@ -194,6 +226,8 @@ def get_evts_perigee(start: CxoTime, stop: CxoTime) -> List["EventPerigee"]:
     states = get_states(start - 3 * u.day, stop + 3 * u.day, state_keys=["obsid"])
     states["obsid"] = np.where(states["obsid"] > 38000, 1, 0)
     states = reduce_states(states, state_keys=["obsid"], merge_identical=True)
+
+    dirnames_prev = stats_prev["dirname"] if len(stats_prev) > 0 else []
 
     events = []
     for cmd in cmds_perigee:
@@ -222,13 +256,18 @@ def get_evts_perigee(start: CxoTime, stop: CxoTime) -> List["EventPerigee"]:
             rad_exit=t_rad_exit,
         )
 
+        if event.dirname in dirnames_prev:
+            # If the event is already in the previous kalman stats table then
+            # move on silently.
+            continue
+
         if event.tlm is not None:
             events.append(event)
         else:
             LOGGER.info(f"No TLM found for perigee event at {event.perigee}, skipping")
             continue
 
-    LOGGER.info(f"Found {len(events)} perigee events")
+    LOGGER.info(f"Found {len(events)} new perigee event(s)")
     return events
 
 
@@ -244,17 +283,7 @@ def get_stats(evts_perigee) -> Table:
     rows = []
 
     for evt in reversed(evts_perigee):
-        low_kals = evt.low_kalmans
-        row = {
-            "dirname": evt.dirname,
-            "perigee": evt.perigee.date[:19],
-        }
-        for key in ["rad_entry", "perigee", "rad_exit"]:
-            row[key] = getattr(evt, key).date
-        for nle in (3, 2, 1):
-            row[f"n{nle}_ints"] = np.count_nonzero((low_kals["n_kalstr"] == nle))
-            row[f"n{nle}_cnt"] = low_kals.meta[f"n{nle}_cnt"]
-        rows.append(row)
+        rows.append(evt.info)
 
     out = Table(rows=rows)
     return out
@@ -492,6 +521,31 @@ class EventPerigee:
         data["obss"] = self.obss.as_array()
 
         return data
+
+    @property
+    def info(self):
+        if not hasattr(self, "_info"):
+            self._info = self._get_info()
+        return self._info
+
+    def _get_info(self):
+        low_kals = self.low_kalmans
+        info = {
+            "dirname": self.dirname,
+            "perigee": self.perigee.date[:19],
+        }
+        for key in ["rad_entry", "perigee", "rad_exit"]:
+            info[key] = getattr(self, key).date
+        for nle in (3, 2, 1):
+            info[f"n{nle}_ints"] = np.count_nonzero((low_kals["n_kalstr"] == nle))
+            info[f"n{nle}_cnt"] = low_kals.meta[f"n{nle}_cnt"]
+        return info
+
+    def write_info(self, opt):
+        """Write info to file"""
+        path = EVT_PERIGEE_INFO_PATH(opt.data_dir, self)
+        LOGGER.info(f"Writing info to {path}")
+        path.write_text(json.dumps(self.info, indent=4))
 
     def write_data(self, opt):
         # Compressed version of data
