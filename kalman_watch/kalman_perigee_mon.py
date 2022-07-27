@@ -381,7 +381,7 @@ class EventPerigee:
             data[f"aca_track{slot}"] = (data["aca_track"] & (1 << slot)).astype(bool)
             data[f"aca_ir{slot}"] = (data["aca_ir"] & (1 << slot)).astype(bool)
 
-        data["times"] = CxoTime(data["perigee"]).secs + data["perigee_times"]
+        data["times"] = obj.perigee.secs + data["perigee_times"].astype(np.float64)
 
         obj._data = data
         obj._obss = Table(data["obss"])
