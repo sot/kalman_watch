@@ -32,6 +32,9 @@ LOGGER = basic_logger(__name__, level="INFO")
 
 FILE_DIR = Path(__file__).parent
 
+# Sub-sample attitude error by 8 to reduce the number of points.
+ATT_ERR_SUBSAMP = 8
+
 
 def PERIGEES_DIR_PATH(data_dir: str) -> Path:
     return Path(data_dir) / "perigees"
@@ -369,6 +372,17 @@ class EventPerigee:
         with np.load(path) as npz_data:
             data = dict(npz_data)
         obj = cls(data["rad_entry"], data["perigee"], data["rad_exit"])
+
+        bad = data["aokalstr"] == -1
+        data["aokalstr"] = data["aokalstr"].astype(np.float64)
+        data["aokalstr"][bad] = np.nan
+
+        for slot in range(8):
+            data[f"aca_track{slot}"] = (data["aca_track"] & (1 << slot)).astype(bool)
+            data[f"aca_ir{slot}"] = (data["aca_ir"] & (1 << slot)).astype(bool)
+
+        data["times"] = CxoTime(data["perigee"]).secs + data["perigee_times"]
+
         obj._data = data
         obj._obss = Table(data["obss"])
         return obj
@@ -456,16 +470,22 @@ class EventPerigee:
         LOGGER.debug(f"Setting data property for {self.dirname}")
         data = {}
         for axis in range(1, 4):
-            data[f"aoatter{axis}"] = self.tlm[f"aoatter{axis}"].vals
+            # Subsample by 8 since this does not vary quickly
+            data[f"aoatter{axis}"] = (
+                self.tlm[f"aoatter{axis}"].vals[::ATT_ERR_SUBSAMP].astype(np.float32)
+            )
         data["aokalstr"] = self.tlm["aokalstr"].vals
-        data["aopcadmd"] = self.tlm["aopcadmd"].vals
-        data["aoacaseq"] = self.tlm["aoacaseq"].vals
-        data["aoacrpt"] = self.tlm["aoacrpt"].vals
+        # fmt: off
+        data["npnt_kalm"] = (
+            (self.tlm["aopcadmd"].vals == "NPNT")
+            & (self.tlm["aoacaseq"].vals == "KALM")
+        )
+        # fmt: on
         for slot in range(8):
-            data[f"aoacfct{slot}"] = self.tlm[f"aoacfct{slot}"].vals
-            data[f"aoaciir{slot}"] = self.tlm[f"aoaciir{slot}"].vals
+            data[f"aca_track{slot}"] = self.tlm[f"aoacfct{slot}"].vals == "TRAK"
+            data[f"aca_ir{slot}"] = self.tlm[f"aoaciir{slot}"].vals == "ERR"
         data["times"] = self.tlm["aokalstr"].times
-        data["perigee_times"] = self.tlm.perigee_times
+        data["perigee_times"] = self.tlm.perigee_times.astype(np.float32)
         data["perigee"] = self.perigee.date
         data["rad_entry"] = self.rad_entry.date
         data["rad_exit"] = self.rad_exit.date
@@ -474,10 +494,37 @@ class EventPerigee:
         return data
 
     def write_data(self, opt):
+        # Compressed version of data
+        dc = {}
+
+        # Store aokalstr as int8 with the nan's as -1
+        vals = self.data["aokalstr"].copy()
+        vals[np.isnan(vals)] = -1
+        dc["aokalstr"] = vals.astype(np.int8)
+
+        for key in (
+            "perigee_times",
+            "npnt_kalm",
+            "perigee",
+            "rad_entry",
+            "rad_exit",
+            "obss",
+            "aoatter1",
+            "aoatter2",
+            "aoatter3",
+        ):
+            dc[key] = self.data[key]
+
+        dc["aca_track"] = np.zeros(len(self.data["times"]), dtype=np.uint8)
+        dc["aca_ir"] = np.zeros(len(self.data["times"]), dtype=np.uint8)
+        for slot in range(8):
+            dc["aca_track"] |= self.data[f"aca_track{slot}"].astype(np.uint8) << slot
+            dc["aca_ir"] |= self.data[f"aca_ir{slot}"].astype(np.uint8) << slot
+
         path = EVT_PERIGEE_DATA_PATH(opt.data_dir, self)
         path.parent.mkdir(parents=True, exist_ok=True)
         LOGGER.info(f"Writing perigee data to {path}")
-        np.savez(path, **self.data)
+        np.savez_compressed(path, **dc)
 
     @property
     def low_kalmans(self):
@@ -605,7 +652,9 @@ class EventPerigee:
             fig.add_trace(trace, row=1, col=1)
 
         for axis in range(1, 4):
-            trace = self.get_attitude_error_trace(perigee_times, axis)
+            trace = self.get_attitude_error_trace(
+                perigee_times[::ATT_ERR_SUBSAMP], axis
+            )
             fig.add_trace(trace, row=3, col=1)
 
         # fig.update(layout=layout, row=2, col=1)
@@ -620,9 +669,8 @@ class EventPerigee:
         y = np.rad2deg(self.data[f"aoatter{axis}"]) * 3600
         y = y.round(1)
         trace = pgo.Scatter(
-            # Subsample to reduce file size since this does not vary quickly
-            x=times[::8],
-            y=y[::8],
+            x=times,
+            y=y,
             line={"color": px.colors.qualitative.Plotly[axis]},
             name=f"AOATTER{axis}",
         )
@@ -650,12 +698,13 @@ class EventPerigee:
         xs = []
         ys = []
         for slot in range(8):
+            # fmt: off
+            # See: https://github.com/psf/black/issues/236
             bad = (
-                (self.data[f"aoacfct{slot}"][i0:i1] != "TRAK")
-                & (self.data["aopcadmd"][i0:i1] == "NPNT")
-                & (self.data["aoacaseq"][i0:i1] == "KALM")
+                ~self.data[f"aca_track{slot}"][i0:i1]
+                & self.data["npnt_kalm"][i0:i1]
             )
-
+            # fmt: on
             x = obs_times[bad]
             xs.append(x)
             ys.append(np.full_like(x, fill_value=slot).astype(int))
@@ -680,12 +729,13 @@ class EventPerigee:
         xs = []
         ys = []
         for slot in range(8):
+            # fmt: off
             bad = (
-                (self.data[f"aoaciir{slot}"][i0:i1] == "ERR")
-                & (self.data[f"aoacfct{slot}"][i0:i1] == "TRAK")
-                & (self.data["aopcadmd"][i0:i1] == "NPNT")
-                & (self.data["aoacaseq"][i0:i1] == "KALM")
+                self.data[f"aca_ir{slot}"][i0:i1]
+                & self.data[f"aca_track{slot}"][i0:i1]
+                & self.data["npnt_kalm"][i0:i1]
             )
+            # fmt: on
 
             x = obs_times[bad]
             xs.append(x)
