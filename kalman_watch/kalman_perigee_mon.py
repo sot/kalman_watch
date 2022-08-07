@@ -100,7 +100,7 @@ def get_dirname(date: Union[CxoTime, None]) -> str:
     return out
 
 
-def get_opt(sys_args):
+def get_opt(sys_args: list) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Kalman star watch {}".format(__version__)
     )
@@ -119,7 +119,7 @@ def get_opt(sys_args):
     parser.add_argument(
         "--make-html", action="store_true", help="Make static HTML pages"
     )
-    args = parser.parse_args(sys_args)
+    args: argparse.Namespace = parser.parse_args(sys_args)
     return args
 
 
@@ -128,7 +128,7 @@ def main(sys_args=None):
     log_run_info(LOGGER.info, opt, version=__version__)
 
     stop = CxoTime(opt.stop)
-    start = stop - opt.lookback * u.day
+    start: CxoTime = stop - opt.lookback * u.day
 
     stats_prev = read_kalman_stats(opt)
     evts_perigee = get_evts_perigee(start, stop, stats_prev)
@@ -163,8 +163,19 @@ def main(sys_args=None):
         # Data collection and alerts are done. Now generate the web pages. This
         # is mostly for testing. In production this is done dynamically using
         # kadi web apps.
-        for evt_perigee in evts_perigee:
-            evt_perigee.make_detail_page(opt)
+        for date_next, stat, date_prev in zip(
+            [None] + stats_all["perigee"][:-1].tolist(),
+            stats_all,
+            stats_all["perigee"][1:].tolist() + [None],
+        ):
+            if stat["perigee"] < start.date:
+                break
+            evt_tmp = EventPerigee(stat["rad_entry"], stat["perigee"], stat["rad_exit"])
+            path = EVT_PERIGEE_DATA_PATH(opt.data_dir, evt_tmp)
+            evt = EventPerigee.from_npz(path)
+            evt.prev_date = date_prev
+            evt.next_date = date_next
+            evt.make_detail_page(opt)
 
         make_index_list_pages(opt, stats_all)
 
@@ -395,6 +406,22 @@ class EventPerigee:
         self.prev_date = None
         self.next_date = None
 
+    @property
+    def prev_date(self):
+        return self._prev_date
+
+    @prev_date.setter
+    def prev_date(self, value):
+        self._prev_date = value if value is None else CxoTime(value)
+
+    @property
+    def next_date(self):
+        return self._next_date
+
+    @next_date.setter
+    def next_date(self, value):
+        self._next_date = value if value is None else CxoTime(value)
+
     @classmethod
     def from_npz(cls, path):
         LOGGER.info(f"Loading perigee event from {path}")
@@ -466,7 +493,7 @@ class EventPerigee:
         tlm["aokalstr"].vals = tlm["aokalstr"].vals.astype(np.float64)
 
         # Reduce everything to the first ACA values during NPNT/KALM
-        ok = tlm["aoacrpt"].vals == "0 "
+        ok = tlm["aoacrpt"].vals.astype(int) == 0
         tlm.interpolate(
             times=tlm["aokalstr"].times[ok], bad_union=False, filter_bad=False
         )
