@@ -44,7 +44,7 @@ LOWKALS_EMPTY = Table(
 logger = basic_logger(__name__, level="INFO")
 
 
-def get_opt(sys_args):
+def get_opt():
     parser = argparse.ArgumentParser(
         description="Kalman star watch {}".format(__version__)
     )
@@ -74,12 +74,11 @@ def get_opt(sys_args):
         default=30.0,
         help="Number of days to highlight in plots and table (days, default=30)",
     )
-    args = parser.parse_args(sys_args)
-    return args
+    return parser
 
 
 def main(sys_args=None):
-    opt = get_opt(sys_args)
+    opt = get_opt().parse_args(sys_args)
 
     lowkals_path = LOWKALS_DATA_PATH(opt.data_dir)
     lowkals_path.parent.mkdir(exist_ok=True, parents=True)

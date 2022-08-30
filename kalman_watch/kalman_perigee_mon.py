@@ -100,7 +100,7 @@ def get_dirname(date: Union[CxoTime, None]) -> str:
     return out
 
 
-def get_opt(sys_args: list) -> argparse.Namespace:
+def get_opt() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Kalman star watch {}".format(__version__)
     )
@@ -119,12 +119,11 @@ def get_opt(sys_args: list) -> argparse.Namespace:
     parser.add_argument(
         "--make-html", action="store_true", help="Make static HTML pages"
     )
-    args: argparse.Namespace = parser.parse_args(sys_args)
-    return args
+    return parser
 
 
 def main(sys_args=None):
-    opt = get_opt(sys_args)
+    opt: argparse.Namespace = get_opt().parse_args(sys_args)
     log_run_info(LOGGER.info, opt, version=__version__)
 
     stop = CxoTime(opt.stop)
