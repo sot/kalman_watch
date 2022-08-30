@@ -82,6 +82,7 @@ def main(sys_args=None):
     opt = get_opt(sys_args)
 
     lowkals_path = LOWKALS_DATA_PATH(opt.data_dir)
+    lowkals_path.parent.mkdir(exist_ok=True, parents=True)
     lowkals_prev = get_lowkals_prev(lowkals_path)
 
     # Start lookback days from stop, except don't start before the last telemetry
