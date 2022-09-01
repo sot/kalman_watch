@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang=en>
+
+<head>
+    <meta charset=utf-8>
+    <title>Perigee {{dirname}}</title>
+    <style type="text/css">
+        table {
+            border-width: 1px;
+            border-spacing: 0px;
+            border-style: outset;
+            border-color: gray;
+            border-collapse: separate;
+        }
+
+        table th,
+        td {
+            border-width: 1px;
+            padding: 1px 5px 1px 5px;
+            border-style: solid;
+            border-color: gray;
+        }
+    </style>
+</head>
+
+<body>
+    {% if evt_perigee_prev_dirname %} <a href="../../{{evt_perigee_prev_dirname}}/index.html">Previous</a>{%
+    endif %}
+    <a href="../../index.html">Index</a>
+    {% if evt_perigee_next_dirname %} <a href="../../{{evt_perigee_next_dirname}}/index.html">Next</a>{% endif %}
+    <h1>Perigee Kalman plot {{date_perigee}} ({{dirname}})</h1>
+    {{kalman_plot_html}}
+    <p></p>
+    {% if has_low_kalmans %}
+    <h2> Low Kalman intervals </h2>
+    {{low_kalmans_html}}
+    {% endif %}
+    <p></p>
+    <table>
+        <tr>
+            <th>Obsid</th>
+            {% for obsid in obsids %}
+        </tr>
+        <tr>
+            <td><a
+                    href="https://web-kadi.cfa.harvard.edu/mica/?obsid_or_date={{obsid}}"
+                    target="_blank" rel="noopener noreferrer">
+                    {{obsid}} </a> </td>
+        </tr>
+        {% endfor %}
+    </table>
+</body>
+
+</html>

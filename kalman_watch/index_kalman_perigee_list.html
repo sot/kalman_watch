@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang=en>
+
+<head>
+    <meta charset=utf-8>
+    <title>Perigee {{date_perigee}}</title>
+    <style type="text/css">
+        table {
+            border-width: 1px;
+            border-spacing: 0px;
+            border-style: outset;
+            border-color: gray;
+            border-collapse: separate;
+            background-color: white;
+        }
+
+        table th,
+        td {
+            border-width: 1px;
+            padding: 1px 5px 1px 5px;
+            border-style: solid;
+            border-color: gray;
+            background-color: white;
+        }
+    </style>
+</head>
+
+<body>
+    {% if prev %} <a href="{{prev}}/index.html">Previous</a>{% endif %}
+    {% if index %} <a href="{{index}}/index.html">Index</a>{% endif %}
+    {% if next %} <a href="{{next}}/index.html">Next</a>{% endif %}
+    <h1>Perigee Kalman index page: {{description}}</h1>
+    <table>
+        <tr>
+            <th>Perigee ID</th>
+            <th>Date</th>
+            <th>N&le;3 for &gt;120 s</th>
+            <th>N&le;2 for &gt;20 s</th>
+            <th>N&le;1 for &gt;10 s</th>
+            <th>N&le;3</th>
+            <th>N&le;2</th>
+            <th>N&le;1</th>
+        </tr>
+        {% for row in kalman_stats %}
+        <tr>
+            <td><a href="{{row.dirname}}/index.html">{{row.dirname}}</a> </td>
+            <td>{{row.perigee}}</td>
+            <td>{{row.n3_ints}}</td>
+            <td>{{row.n2_ints}}</td>
+            <td>{{row.n1_ints}}</td>
+            <td>{{row.n3_cnt}}</td>
+            <td>{{row.n2_cnt}}</td>
+            <td>{{row.n1_cnt}}</td>
+        </tr>
+        {% endfor %}
+    </table>
+
+    {% if years %}
+    <h2>Perigee plots by year</h2>
+    <table>
+        <tr><th>Year</th></tr>
+        {% for year in years %}
+        <tr><td><a href="{{year}}/index.html">{{year}}</a></td></tr>
+        {% endfor %}
+    </table>
+    {% endif %}
+
+</body>
+
+</html>
