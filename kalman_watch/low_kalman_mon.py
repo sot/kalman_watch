@@ -116,12 +116,7 @@ def get_lowkals_new(
     # Get the AOKALSTR data with number of kalman stars reported by OBC.
     logger.info(f"Getting telemetry between {start} and {stop}")
 
-    # WARNING: this is a trap I fell into! This needs fixing. Grabbing data
-    # from MAUDE like this might result in data gaps during comm.
-    with fetch.data_source("cxc", "maude allow_subset=False"):
-        dat = fetch.Msidset(
-            ["aokalstr", "aoacaseq", "aopcadmd", "cobsrqid"], start, stop
-        )
+    dat = fetch.Msidset(["aokalstr", "aoacaseq", "aopcadmd", "cobsrqid"], start, stop)
     dat.interpolate(1.025)
 
     if len(dat.times) < 300:
@@ -156,7 +151,7 @@ def get_lowkals_new(
     # Warn in processing for long duration drop intervals
     long_mask = lowkals["duration"] > opt.long_duration
     for lowkal in lowkals[long_mask]:
-        logger.warn(
+        logger.warning(
             f"WARNING: Fewer than two kalman stars at {lowkal['datestart']} "
             f"for {lowkal['duration']:.1f} secs"
         )
