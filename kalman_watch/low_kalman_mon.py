@@ -151,7 +151,7 @@ def get_lowkals_new(
     # Warn in processing for long duration drop intervals
     long_mask = lowkals["duration"] > opt.long_duration
     for lowkal in lowkals[long_mask]:
-        logger.warn(
+        logger.warning(
             f"WARNING: Fewer than two kalman stars at {lowkal['datestart']} "
             f"for {lowkal['duration']:.1f} secs"
         )
