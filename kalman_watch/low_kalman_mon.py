@@ -126,13 +126,16 @@ def get_lowkals_new(
         return lowkals
 
     logger.info("Finding intervals of low kalman stars")
-    # Find intervals of low kalman stars
+    # Find intervals of low kalman stars. We use complete_intervals=True to ensure that
+    # only complete intervals get stored. A partial interval will get picked up in the
+    # next daily processing.
     lowkals = logical_intervals(
         dat["aokalstr"].times,
         (dat["aokalstr"].vals.astype(int) <= 1)
         & (dat["aoacaseq"].vals == "KALM")
         & (dat["aopcadmd"].vals == "NPNT"),
         max_gap=10.0,
+        complete_intervals=True,
     )
 
     # Select events with minimum duration (4 seconds by default)
