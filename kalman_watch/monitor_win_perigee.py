@@ -11,6 +11,7 @@ import argparse
 import functools
 import pickle
 from pathlib import Path
+import re
 
 import astropy.units as u
 import matplotlib
@@ -26,10 +27,11 @@ from cheta.utils import logical_intervals
 from cxotime import CxoTime, date2secs
 from kadi.commands import get_cmds, get_observations, get_starcats
 from ska_helpers.logging import basic_logger
+import kadi.events
 
 from kalman_watch import __version__
 
-matplotlib.use("Agg")
+# matplotlib.use("Agg")
 matplotlib.style.use("bmh")
 
 LOGGER = basic_logger(__name__, level="INFO")
@@ -45,9 +47,11 @@ def get_opt() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Monitor window perigee data {}".format(__version__)
     )
-    parser.add_argument("--stop", type=str, help="Stop date (default=NOW)")
     parser.add_argument(
-        "--lookback", type=float, default=14, help="Lookback time (days, default=14)"
+        "--start", type=str, default="-30d", help="Start date (default=NOW - 30 days)"
+    )
+    parser.add_argument(
+        "--stop", type=str, default="0d", help="Stop date (default=NOW)"
     )
     parser.add_argument("--data-dir", type=str, default=".", help="Data directory")
     return parser
@@ -234,7 +238,7 @@ def get_kalman_drops_per_minute(mon):
 
 
 # Copied from kalman-drops-perigee-evolution.ipynb but added `label` argument
-def plot_kalman_drops(kalman_drops_data, ax, alpha=1.0, title=None, label=None):
+def plot_kalman_drops_old(kalman_drops_data, ax, alpha=1.0, title=None, label=None):
     _, _, times, n_drops, colors = kalman_drops_data
     scat = ax.scatter(
         times / 60,
@@ -263,7 +267,7 @@ def get_kalman_drops_data(mon, idx):
 def plot_kalman_drops_all(kalman_drops_data_list, savefig=None):
     fig, ax = plt.subplots(1, 1, figsize=(12, 3.5))
     for kalman_drops_data in kalman_drops_data_list:
-        plot_kalman_drops(
+        plot_kalman_drops_old(
             kalman_drops_data,
             ax,
             alpha=1.0,
@@ -274,10 +278,114 @@ def plot_kalman_drops_all(kalman_drops_data_list, savefig=None):
         fig.savefig(savefig)
 
 
-def main():
-    opt = get_opt().parse_args()
-    stop = CxoTime(opt.stop)
-    start = stop - opt.lookback * u.d
+def reshape_to_n_sample_2d(arr, n_sample=60):
+    arr = arr[: -(arr.size % n_sample)]
+    arr = arr.reshape(-1, n_sample)
+    return arr
+
+
+def process_dat(dat, n_sample=60):
+    dat = dat.interpolate(times=dat["aokalstr"].times, copy=True)
+    n_kalmans = dat["aokalstr"].raw_vals.astype(float)
+    times = dat.times
+    ok = (dat["aopcadmd"].vals == "NPNT") & (dat["aoacaseq"].vals == "KALM")
+    n_kalmans[~ok] = np.nan
+    # Resize n_kalmans to be a multiple of n_sample and then reshape to be 2D with one
+    # row per 60 samples
+    n_kalmans = reshape_to_n_sample_2d(n_kalmans, n_sample)
+    times = reshape_to_n_sample_2d(times, n_sample)
+    n_lost_means = np.nansum(8 - n_kalmans, axis=1)
+    time_means = np.nanmean(times, axis=1)
+    # Count the number of nans in each row
+    n_nans = np.sum(np.isnan(n_kalmans), axis=1)
+    ok = n_nans == 0
+
+    return time_means[ok], n_lost_means[ok]
+
+
+def get_kalman_drops(start, stop, duration=100):
+    start = CxoTime(start)
+    stop = CxoTime(stop)
+    rad_zones = kadi.events.rad_zones.filter(start, stop).table
+    perigee_times = CxoTime(rad_zones["perigee"])
+    msids = ["aokalstr", "aopcadmd", "aoacaseq"]
+    times_list = []
+    n_drops_list = []
+    colors_list = []
+    for idx, perigee_time in enumerate(perigee_times):
+        dat = fetch.MSIDset(
+            msids, perigee_time - duration * u.min, perigee_time + duration * u.min
+        )
+        if len(dat["aokalstr"]) > 200:
+            times, n_drops = process_dat(dat)
+            times_list.append(times - perigee_time.secs)
+            n_drops_list.append(n_drops)
+            colors_list.append([f"C{idx}"] * len(times))
+
+    return (
+        start,
+        stop,
+        np.concatenate(times_list),
+        np.concatenate(n_drops_list),
+        np.concatenate(colors_list),
+    )
+
+
+def plot_kalman_drops(kalman_drops_data, ax, alpha=1.0, title=None, marker_size=10):
+    start, stop, times, n_drops, colors = kalman_drops_data
+    scat = ax.scatter(
+        times / 60,
+        n_drops.clip(None, 160),
+        s=marker_size,
+        c=colors,
+        alpha=alpha,
+    )
+    # set major ticks every 10 minutes
+    ax.xaxis.set_major_locator(plt.MultipleLocator(10))
+    if title is None:
+        title = f"Kalman drops per minute near perigee {start.iso[:7]}"
+    if title:
+        ax.set_title(title)
+    ax.set_xlabel("Time from perigee (minutes)")
+    return scat
+
+
+def plot_mon_win_and_aokalstr_composite(
+    kalman_drops_npnt, kalman_drops_nman_list, outfile=None, title=""
+):
+    fig, ax = plt.subplots(1, 1, figsize=(10, 3))
+
+    plot_kalman_drops(
+        kalman_drops_npnt,
+        ax=ax,
+        alpha=0.4,
+    )
+
+    for mon_win_kalman_drops in kalman_drops_nman_list:
+        plot_kalman_drops(
+            mon_win_kalman_drops, ax=ax, alpha=1.0, marker_size=20, title=""
+        )
+
+    ax.set_title(title)
+    fig.tight_layout()
+
+    if outfile:
+        fig.savefig(outfile)
+
+
+def cxotime_reldate(date):
+    if re.match("[-+]? [0-9]* \.? [0-9]+ d", date, re.VERBOSE):
+        dt = float(date[:-1])
+        out = CxoTime.now() + dt * u.d
+    else:
+        out = CxoTime(date)
+    return out
+
+
+def main(args=None):
+    opt = get_opt().parse_args(args)
+    start = cxotime_reldate(opt.start)
+    stop = cxotime_reldate(opt.stop)
 
     manvrs_perigee = get_manvrs_perigee(start, stop)
 
@@ -286,16 +394,20 @@ def main():
         mon = get_mon_dataset(manvr["datestart"], manvr["datestop"])
         mons.append(mon)
 
-    kalman_drops_data_list = []
+    kalman_drops_nman_list = []
     for idx, mon in enumerate(mons):
         kalman_drops_data = get_kalman_drops_data(mon, idx)
-        kalman_drops_data_list.append(kalman_drops_data)
+        kalman_drops_nman_list.append(kalman_drops_data)
 
-    outfile = Path(opt.data_dir) / "mon_win_kalman_drops.png"
-    plot_kalman_drops_all(kalman_drops_data_list, savefig=outfile)
+    kalman_drops_npnt = get_kalman_drops(start, stop)
 
-    # pickle.dump(kalman_drops_data_list, open("mon_win_kalman_drops_data.pkl", "wb"))
+    outfile = Path(opt.data_dir) / f"mon_win_kalman_drops_{opt.start}_{opt.stop}.png"
+    title = f"Perigee Kalman drops per minute {start.date[:8]} to {stop.date[:8]}"
+    plot_mon_win_and_aokalstr_composite(
+        kalman_drops_npnt, kalman_drops_nman_list, outfile=outfile, title=title
+    )
 
 
 if __name__ == "__main__":
+    matplotlib.use("Agg")
     main()
