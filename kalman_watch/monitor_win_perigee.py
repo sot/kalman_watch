@@ -9,7 +9,6 @@
 
 import argparse
 import functools
-import pickle
 from pathlib import Path
 import re
 
@@ -37,6 +36,8 @@ matplotlib.style.use("bmh")
 LOGGER = basic_logger(__name__, level="INFO")
 
 
+# TODO: replace with generic Earth block code in chandra_aca.planets (coded in
+# 2023-11 quarterly ATM).
 EARTH_BLOCKS = [
     ("2023:297:12:23:00", "2023:297:12:48:37"),
     ("2023:300:03:49:00", "2023:300:04:16:40"),
@@ -48,20 +49,34 @@ def get_opt() -> argparse.ArgumentParser:
         description="Monitor window perigee data {}".format(__version__)
     )
     parser.add_argument(
-        "--start", type=str, default="-30d", help="Start date (default=NOW - 30 days)"
+        "--start",
+        type=str,
+        default="-45d",
+        help='Start date (default=NOW - 45 days written as "-45d")',
     )
     parser.add_argument(
-        "--stop", type=str, default="0d", help="Stop date (default=NOW)"
+        "--stop", type=str, default="0d", help='Stop date (default=NOW written as "0d")'
     )
-    parser.add_argument("--data-dir", type=str, default=".", help="Data directory")
+    parser.add_argument("--data-dir", type=str, default=".", help="Data directory (default=.)")
     return parser
 
 
-def get_manvrs_perigee(start, stop):
-    """Get maneuvers that are entirely within 40 minutes of perigee.
+def get_manvrs_perigee(start, stop) -> Table:
+    """Get maneuvers that start or stop within 40 minutes of perigee.
 
     This is used to select the monitor window data to compute the number of kalman drops
     per minute during perigee.
+
+    Maneuvers are defined as intervals of AOPCADMD == "NMAN" available in the CXC cheta
+    archive.
+
+    Returns an astropy Table with a row for each maneuver interval.  Columns are:
+
+    * datestart: date of interval start
+    * datestop: date of interval stop
+    * duration: duration of interval (sec)
+    * tstart: time of interval start (CXC sec)
+    * tstop: time of interval stop (CXC sec)
 
     Returns
     -------
@@ -76,8 +91,7 @@ def get_manvrs_perigee(start, stop):
 
     perigee_dates = cmds[cmds["event_type"] == "EPERIGEE"]["date"]
 
-    with fetch.data_source("cxc", "maude"):
-        pcad_mode = fetch.Msid("aopcadmd", start, stop)
+    pcad_mode = fetch.Msid("aopcadmd", start, stop)
 
     for block_start, block_stop in EARTH_BLOCKS:
         idx0, idx1 = pcad_mode.times.searchsorted(
@@ -90,7 +104,7 @@ def get_manvrs_perigee(start, stop):
     # Get maneuvers that are entirely within 40 minutes of perigee
     manvrs_perigee = []
     for perigee_date in CxoTime(perigee_dates):
-        ok = (np.abs(manvrs["tstart"] - perigee_date.secs) < 40 * 60) & (
+        ok = (np.abs(manvrs["tstart"] - perigee_date.secs) < 40 * 60) | (
             np.abs(manvrs["tstop"] - perigee_date.secs) < 40 * 60
         )
         manvrs_perigee.append(manvrs[ok])
@@ -100,7 +114,7 @@ def get_manvrs_perigee(start, stop):
     return manvrs_perigee
 
 
-def get_aca_images_cached(start, stop):
+def get_aca_images_cached(start: CxoTimeLike, stop: CxoTimeLike, data_dir: str | Path):
     LOGGER.info(f"Getting ACA images from {start.date} to {stop.date}")
     datestart = CxoTime(start).date
     datestop = CxoTime(stop).date

@@ -8,6 +8,7 @@ except ImportError:
 
 entry_points = {
     "console_scripts": [
+        "kalman_watch_monitor_win_perigee = kalman_watch.monitor_win_perigee:main",
         "kalman_watch_low_kalman_mon = kalman_watch.low_kalman_mon:main",
         "kalman_watch_kalman_perigee_mon = kalman_watch.kalman_perigee_mon:main",
     ]
