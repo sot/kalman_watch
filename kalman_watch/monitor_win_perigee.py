@@ -23,17 +23,16 @@ from chandra_aca.maude_decom import get_aca_images
 from chandra_aca.transform import mag_to_count_rate
 from cheta import fetch
 from cheta.utils import logical_intervals
-from cxotime import CxoTime, date2secs
+from cxotime import CxoTime, CxoTimeLike, date2secs
 from kadi.commands import get_cmds, get_observations, get_starcats
 from ska_helpers.logging import basic_logger
 import kadi.events
 
 from kalman_watch import __version__
 
-# matplotlib.use("Agg")
 matplotlib.style.use("bmh")
 
-LOGGER = basic_logger(__name__, level="INFO")
+logger = basic_logger(__name__, level="INFO")
 
 
 # TODO: replace with generic Earth block code in chandra_aca.planets (coded in
@@ -54,14 +53,16 @@ def get_opt() -> argparse.ArgumentParser:
         default="-45d",
         help='Start date (default=NOW - 45 days written as "-45d")',
     )
+    # Default stop is 1 day before now. This is to avoid the case where MAUDE telemetry
+    # is not complete through the stop date and the cached images will be incomplete.
     parser.add_argument(
-        "--stop", type=str, default="0d", help='Stop date (default=NOW written as "0d")'
+        "--stop", type=str, default="-1d", help='Stop date (default=-1d from now)'
     )
     parser.add_argument("--data-dir", type=str, default=".", help="Data directory (default=.)")
     return parser
 
 
-def get_manvrs_perigee(start, stop) -> Table:
+def get_manvrs_perigee(start: CxoTimeLike, stop: CxoTimeLike) -> Table:
     """Get maneuvers that start or stop within 40 minutes of perigee.
 
     This is used to select the monitor window data to compute the number of kalman drops
@@ -78,6 +79,13 @@ def get_manvrs_perigee(start, stop) -> Table:
     * tstart: time of interval start (CXC sec)
     * tstop: time of interval stop (CXC sec)
 
+    Parameters
+    ----------
+    start : CxoTimeLike
+        Start time
+    stop : CxoTimeLike
+        Stop time
+
     Returns
     -------
     manvrs_perigee : Table
@@ -85,7 +93,7 @@ def get_manvrs_perigee(start, stop) -> Table:
     """
     start = CxoTime(start)
     stop = CxoTime(stop)
-    LOGGER.info(f"Getting maneuvers from {start.date} to {stop.date}")
+    logger.info(f"Getting maneuvers from {start.date} to {stop.date}")
 
     cmds = get_cmds(start, stop)
 
@@ -115,21 +123,69 @@ def get_manvrs_perigee(start, stop) -> Table:
 
 
 def get_aca_images_cached(start: CxoTimeLike, stop: CxoTimeLike, data_dir: str | Path):
-    LOGGER.info(f"Getting ACA images from {start.date} to {stop.date}")
+    """Get ACA images from MAUDE and cache them in a file.
+
+    Images are cached in ``data_dir/aca_img_cache/``. Files outside of start/stop range
+    are deleted.
+
+    Parameters
+    ----------
+    start : CxoTimeLike
+        Start time
+    stop : CxoTimeLike
+        Stop time
+
+    Returns
+    -------
+    imgs : Table
+        Table of ACA image data from chandra_aca.maude_decom.get_aca_images()
+
+    """
+    logger.info(f"Getting ACA images from {start.date} to {stop.date}")
     datestart = CxoTime(start).date
     datestop = CxoTime(stop).date
     cache_dir = Path("data")
     cache_dir.mkdir(exist_ok=True)
-    cache = cache_dir / f"aca_imgs_{datestart}_{datestop}.fits.gz"
+    filename = f"aca_imgs_{datestart}_{datestop}.fits.gz"
+    cache = cache_dir / filename
     if cache.exists():
-        return Table.read(cache)
+        out = Table.read(cache)
     else:
         imgs = get_aca_images(datestart, datestop)
         imgs.write(cache)
-        return imgs
+        out = imgs
+
+    # Delete files outside of start/stop range
+    for filename in cache_dir.glob("aca_imgs_*.fits.gz"):
+        datestart, datestop = filename.name.split("_")[2:4]
+        if CxoTime(datestart) < start or CxoTime(datestop) > stop:
+            filename.unlink()
+
+    return out
 
 
-def process_imgs(imgs, slot):
+def process_imgs(imgs: Table, slot: int) -> Table:
+    """Process MON data images for a single slot.
+
+    This includes calibrating, computing background by a median filter and subtracting
+    background. New slots:
+    * img: calibrated image (e-/s)
+    * bgd: background image (e-/s) as a moving median filter of img
+    * img_corr: img - bgd
+    * img_sum: sum of img_corr over all pixels
+
+    Parameters
+    ----------
+    imgs : Table
+        Table of ACA images from chandra_aca.maude_decom.get_aca_images()
+    slot : int
+        Slot number (0-7)
+
+    Returns
+    -------
+    imgs_slot : Table
+        Table of MON data images for a single slot
+    """
     # Select MON data for this slot
     imgs_slot = imgs[(imgs["IMGNUM"] == slot) & (imgs["IMGFUNC"] == 2)]
     for name in imgs_slot.colnames:
@@ -153,7 +209,19 @@ def process_imgs(imgs, slot):
     return imgs_slot
 
 
-def get_nearest_perigee_date(date) -> CxoTime:
+def get_nearest_perigee_date(date: CxoTimeLike) -> CxoTime:
+    """Get the date of the nearest perigee to ``date``.
+
+    Parameters
+    ----------
+    date : CxoTimeLike
+        Date
+
+    Returns
+    -------
+    perigee_date : CxoTime
+        Date of nearest perigee
+    """
     date = CxoTime(date)
     cmds = get_cmds(date - 3 * u.d, date + 3 * u.d, event_type="EPERIGEE")
     idx = np.argmin(np.abs(cmds["time"] - date.secs))
@@ -162,7 +230,7 @@ def get_nearest_perigee_date(date) -> CxoTime:
 
 @functools.lru_cache()
 def get_ir_thresholds(start, stop):
-    LOGGER.info(f"Getting IR thresholds from {start} to {stop}")
+    logger.info(f"Getting IR thresholds from {start} to {stop}")
     obss = get_observations(start, stop)
     thresholds_list = []
     for obs in obss:
@@ -213,7 +281,7 @@ def get_mon_dataset(start, stop):
     stop = CxoTime(stop)
     start.format = "date"
     stop.format = "date"
-    LOGGER.info(f"Getting MON data from {start.date} to {stop.date}")
+    logger.info(f"Getting MON data from {start.date} to {stop.date}")
     imgs = get_aca_images_cached(start, stop)
 
     # Create a dataset of MON data for this slot
