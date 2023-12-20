@@ -80,6 +80,15 @@ def get_opt() -> argparse.ArgumentParser:
         default="2023:200",
         help="Stop date for sampling guide stars for IR thresholds",
     )
+    parser.add_argument(
+        "--n-cache",
+        type=int,
+        default=30,
+        help=(
+            "Number of cached ACA images files (~0.7 Mb each) to keep (default=30)"
+            " (set to 0 to disable caching)"
+        ),
+    )
     return parser
 
 
@@ -147,6 +156,7 @@ def get_aca_images_cached(
     start: CxoTime,
     stop: CxoTime,
     data_dir: Path,
+    cache: bool = True,
 ) -> ACAImagesTable:
     """Get ACA images from MAUDE and cache them in a file.
 
@@ -161,6 +171,8 @@ def get_aca_images_cached(
         Stop time
     data_dir : Path
         Directory root for cached images
+    cache : bool
+        If True then cache images in ``data_dir/aca_imgs_cache/``
 
     Returns
     -------
@@ -169,37 +181,35 @@ def get_aca_images_cached(
 
     """
     logger.info(f"Getting ACA images from {start.date} to {stop.date}")
-    cache_dir = data_dir / "aca_imgs_cache"
-    cache_dir.mkdir(exist_ok=True)
-    path = f"aca_imgs_{start.date}_{stop.date}.fits.gz"
-    cache_file = cache_dir / path
+    if not cache:
+        return get_aca_images(start, stop)
+
+    name = f"aca_imgs_{start.date}_{stop.date}.fits.gz"
+    cache_file = data_dir / "aca_imgs_cache" / name
+
     if cache_file.exists():
         out = Table.read(cache_file)
     else:
-        imgs = get_aca_images(start, stop)
-        imgs.write(cache_file)
-        out = imgs
+        out = get_aca_images(start, stop)
+        cache_file.parent.mkdir(exist_ok=True)
+        out.write(cache_file)
 
     return out
 
-def clean_aca_images_cache(start, stop, data_dir):
+
+def clean_aca_images_cache(n_cache, data_dir):
     """Clean the ACA images cache directory."""
-    logger.info(f"Cleaning ACA images cache outside of {start.date} to {stop.date}")
+    logger.info(f"Cleaning ACA images cache to keep most recent {n_cache} files")
     data_dir = Path(data_dir)
     cache_dir = data_dir / "aca_imgs_cache"
 
-    # Delete files outside of start/stop range
-    for path in cache_dir.glob("aca_imgs_*_*.fits.gz"):
-        match = re.match(r"aca_imgs_([0-9:.]+)_([0-9:.]+).fits.gz", path.name)
-        if not match:
-            logger.warning(f"Skipping {path} (not a cache file)")
-            continue
-        file_start = match.group(1)
-        file_stop = match.group(2)
-        if CxoTime(file_stop) < start or CxoTime(file_start) > stop:
-            print(f"Deleting {path}")
-            path.unlink()
-
+    # Keep the most recent n_cache files based on file creation time
+    cache_files = sorted(
+        cache_dir.glob("aca_imgs_*.fits.gz"), key=lambda x: x.stat().st_mtime
+    )
+    for path in cache_files[:-n_cache]:
+        logger.info(f"Deleting {path}")
+        path.unlink()
 
 
 def process_imgs(imgs: Table, slot: int) -> ACAImagesTable:
@@ -358,6 +368,7 @@ def get_mon_dataset(
     ir_thresholds_start: CxoTimeLike,
     ir_thresholds_stop: CxoTimeLike,
     data_dir: str | Path,
+    cache: bool = True,
 ) -> MonDataSet:
     """Get a dataset of MON data over the time range.
 
@@ -382,6 +393,8 @@ def get_mon_dataset(
         Stop time for sampling guide stars for IR thresholds
     data_dir : str, Path
         Directory root for cached images
+    cache : bool
+        If True then cache images in ``data_dir/aca_imgs_cache/``
 
     Returns
     -------
@@ -394,7 +407,7 @@ def get_mon_dataset(
     start.format = "date"
     stop.format = "date"
     logger.info(f"Getting MON data from {start.date} to {stop.date}")
-    imgs = get_aca_images_cached(start, stop, data_dir)
+    imgs = get_aca_images_cached(start, stop, data_dir, cache=cache)
 
     # Create a dataset of MON data for this slot
     mon = {}
@@ -575,6 +588,7 @@ def main(args=None):
             opt.ir_thresholds_start,
             opt.ir_thresholds_stop,
             opt.data_dir,
+            cache=opt.n_cache > 0,
         )
         mons.append(mon)
 
@@ -596,7 +610,7 @@ def main(args=None):
         kalman_drops_npnt, kalman_drops_nman_list, outfile=outfile, title=title
     )
 
-    clean_aca_images_cache(start, stop, opt.data_dir)
+    clean_aca_images_cache(opt.n_cache, opt.data_dir)
 
 
 if __name__ == "__main__":
