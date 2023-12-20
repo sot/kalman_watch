@@ -1,16 +1,21 @@
-# # Perigee monitor window data and kalman drops
-#
-# This notebook examines the monitor window data for the first handful of perigees after
-# the start of monitor windows during maneuvers.
-#
-# It also massages the data into an effective number of kalman drops per minute, matching
-# roughly the same quantity which has been shown in the kalman drops evolution analysis.
-# The data are plotted with the same function as in kalman-drops-perigee-evolution.ipynb.
+# Licensed under a 3-clause BSD style license - see LICENSE.rst
+
+"""Perigee monitor window data and kalman drops
+
+Generate a trending plot which combines the perigee monitor window data during NMAN with
+the kalman drops data (from AOKALSTR) during NPNT. This is used to evaluate the
+evolution of the high ionizing radiation (IR) zone during perigee.
+
+This is normally run as a script which by default generates a plot
+``<data_dir>/mon_win_kalman_drops_-45d_-1d.png`` in the current directory. It will also
+cache the MAUDE images in the ``<data_dir>/aca_imgs_cache/`` directory.
+"""
 
 import argparse
 import functools
 from pathlib import Path
 import re
+from typing import TypeAlias
 
 import astropy.units as u
 import matplotlib
@@ -42,6 +47,10 @@ EARTH_BLOCKS = [
     ("2023:300:03:49:00", "2023:300:04:16:40"),
 ]
 
+# Typing hint for a table of images coming from chandra_aca.maude_decom.get_aca_images()
+ACAImagesTable: TypeAlias = Table
+MonDataSet: TypeAlias = dict[str]
+
 
 def get_opt() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -56,9 +65,21 @@ def get_opt() -> argparse.ArgumentParser:
     # Default stop is 1 day before now. This is to avoid the case where MAUDE telemetry
     # is not complete through the stop date and the cached images will be incomplete.
     parser.add_argument(
-        "--stop", type=str, default="-1d", help='Stop date (default=-1d from now)'
+        "--stop", type=str, default="-1d", help="Stop date (default=-1d from now)"
     )
-    parser.add_argument("--data-dir", type=str, default=".", help="Data directory (default=.)")
+    parser.add_argument(
+        "--data-dir", type=str, default=".", help="Data directory (default=.)"
+    )
+    parser.add_argument(
+        "--ir-thresholds-start",
+        default="2023:100",
+        help="Start date for sampling guide stars for IR thresholds",
+    )
+    parser.add_argument(
+        "--ir-thresholds-stop",
+        default="2023:200",
+        help="Stop date for sampling guide stars for IR thresholds",
+    )
     return parser
 
 
@@ -122,49 +143,66 @@ def get_manvrs_perigee(start: CxoTimeLike, stop: CxoTimeLike) -> Table:
     return manvrs_perigee
 
 
-def get_aca_images_cached(start: CxoTimeLike, stop: CxoTimeLike, data_dir: str | Path):
+def get_aca_images_cached(
+    start: CxoTime,
+    stop: CxoTime,
+    data_dir: Path,
+) -> ACAImagesTable:
     """Get ACA images from MAUDE and cache them in a file.
 
-    Images are cached in ``data_dir/aca_img_cache/``. Files outside of start/stop range
+    Images are cached in ``data_dir/aca_imgs_cache/``. Files outside of start/stop range
     are deleted.
 
     Parameters
     ----------
-    start : CxoTimeLike
+    start : CxoTime
         Start time
-    stop : CxoTimeLike
+    stop : CxoTime
         Stop time
+    data_dir : Path
+        Directory root for cached images
 
     Returns
     -------
-    imgs : Table
+    imgs : ACAImagesTable
         Table of ACA image data from chandra_aca.maude_decom.get_aca_images()
 
     """
     logger.info(f"Getting ACA images from {start.date} to {stop.date}")
-    datestart = CxoTime(start).date
-    datestop = CxoTime(stop).date
-    cache_dir = Path("data")
+    cache_dir = data_dir / "aca_imgs_cache"
     cache_dir.mkdir(exist_ok=True)
-    filename = f"aca_imgs_{datestart}_{datestop}.fits.gz"
-    cache = cache_dir / filename
-    if cache.exists():
-        out = Table.read(cache)
+    path = f"aca_imgs_{start.date}_{stop.date}.fits.gz"
+    cache_file = cache_dir / path
+    if cache_file.exists():
+        out = Table.read(cache_file)
     else:
-        imgs = get_aca_images(datestart, datestop)
-        imgs.write(cache)
+        imgs = get_aca_images(start, stop)
+        imgs.write(cache_file)
         out = imgs
-
-    # Delete files outside of start/stop range
-    for filename in cache_dir.glob("aca_imgs_*.fits.gz"):
-        datestart, datestop = filename.name.split("_")[2:4]
-        if CxoTime(datestart) < start or CxoTime(datestop) > stop:
-            filename.unlink()
 
     return out
 
+def clean_aca_images_cache(start, stop, data_dir):
+    """Clean the ACA images cache directory."""
+    logger.info(f"Cleaning ACA images cache outside of {start.date} to {stop.date}")
+    data_dir = Path(data_dir)
+    cache_dir = data_dir / "aca_imgs_cache"
 
-def process_imgs(imgs: Table, slot: int) -> Table:
+    # Delete files outside of start/stop range
+    for path in cache_dir.glob("aca_imgs_*_*.fits.gz"):
+        match = re.match(r"aca_imgs_([0-9:.]+)_([0-9:.]+).fits.gz", path.name)
+        if not match:
+            logger.warning(f"Skipping {path} (not a cache file)")
+            continue
+        file_start = match.group(1)
+        file_stop = match.group(2)
+        if CxoTime(file_stop) < start or CxoTime(file_start) > stop:
+            print(f"Deleting {path}")
+            path.unlink()
+
+
+
+def process_imgs(imgs: Table, slot: int) -> ACAImagesTable:
     """Process MON data images for a single slot.
 
     This includes calibrating, computing background by a median filter and subtracting
@@ -229,7 +267,24 @@ def get_nearest_perigee_date(date: CxoTimeLike) -> CxoTime:
 
 
 @functools.lru_cache()
-def get_ir_thresholds(start, stop):
+def get_ir_thresholds(start: CxoTimeLike, stop: CxoTimeLike) -> np.ndarray:
+    """Get IR thresholds for guide stars in the time range.
+
+    This emulates the PEA behavior of using the maximum of 350 and star counts / 16 as
+    the delta counts threshold for setting the IR flag.
+
+    Parameters
+    ----------
+    start : CxoTimeLike
+        Start time
+    stop : CxoTimeLike
+        Stop time
+
+    Returns
+    -------
+    thresholds : np.ndarray
+        Array of IR thresholds for each guide star in the time range
+    """
     logger.info(f"Getting IR thresholds from {start} to {stop}")
     obss = get_observations(start, stop)
     thresholds_list = []
@@ -247,8 +302,28 @@ def get_ir_thresholds(start, stop):
     return out
 
 
-def get_hits(mon):
-    ir_thresholds_iter = get_ir_thresholds("2023:100", "2023:200")
+def get_hits(
+    mon: ACAImagesTable,
+    ir_thresholds_start: CxoTimeLike,
+    ir_thresholds_stop: CxoTimeLike,
+) -> Table:
+    """Get the hits (IR flag set) for the monitor window data.
+
+    Parameters
+    ----------
+    mon : ACAImagesTable
+        Table of MON data images for a single slot
+    ir_thresholds_start : CxoTimeLike
+        Start time for sampling guide stars for IR thresholds
+    ir_thresholds_stop : CxoTimeLike
+        Stop time for sampling guide stars for IR thresholds
+
+    Returns
+    -------
+    hits : Table
+        Table of hits (IR flag set) for the monitor window data
+    """
+    ir_thresholds_iter = get_ir_thresholds(ir_thresholds_start, ir_thresholds_stop)
 
     img_sum = mon["imgs"]["img_sum"]
     img_idxs = np.where(img_sum > 500)[0]
@@ -273,16 +348,53 @@ def get_hits(mon):
         hits.append(hit)
     hits = Table(hits)
     hits["hit_idx"] = np.arange(len(hits))
+
     return hits
 
 
-def get_mon_dataset(start, stop):
+def get_mon_dataset(
+    start: CxoTimeLike,
+    stop: CxoTimeLike,
+    ir_thresholds_start: CxoTimeLike,
+    ir_thresholds_stop: CxoTimeLike,
+    data_dir: str | Path,
+) -> MonDataSet:
+    """Get a dataset of MON data over the time range.
+
+    This returns a dict with keys:
+    - imgs: Table of MON data images for all slots sorted by time with extra columns:
+        - img_idx: index into imgs
+        - dt_min: time in minutes since perigee
+    - perigee_date: date of nearest perigee to the middle of the time range
+    - hits: Table of hits (IR flag set) for the monitor window data
+    - start: start time
+    - stop: stop time
+
+    Parameters
+    ----------
+    start : CxoTimeLike
+        Start time
+    stop : CxoTimeLike
+        Stop time
+    ir_thresholds_start : CxoTimeLike
+        Start time for sampling guide stars for IR thresholds
+    ir_thresholds_stop : CxoTimeLike
+        Stop time for sampling guide stars for IR thresholds
+    data_dir : str, Path
+        Directory root for cached images
+
+    Returns
+    -------
+    mon : MonDataSet
+        Dataset of MON data over the time range
+    """
+    data_dir = Path(data_dir)
     start = CxoTime(start)
     stop = CxoTime(stop)
     start.format = "date"
     stop.format = "date"
     logger.info(f"Getting MON data from {start.date} to {stop.date}")
-    imgs = get_aca_images_cached(start, stop)
+    imgs = get_aca_images_cached(start, stop, data_dir)
 
     # Create a dataset of MON data for this slot
     mon = {}
@@ -297,15 +409,28 @@ def get_mon_dataset(start, stop):
     mon["start"] = start
     mon["stop"] = stop
 
-    mon["hits"] = get_hits(mon)
+    mon["hits"] = get_hits(mon, ir_thresholds_start, ir_thresholds_stop)
 
     return mon
 
 
-def get_kalman_drops_per_minute(mon):
-    # Get the number of drops per "minute", where a "minute" is really 60 * 1.025
-    # seconds, or 1.025 minutes. This matches what is done in
-    # kalman-drops-perigee-evolution.ipynb.
+def get_kalman_drops_per_minute(mon: MonDataSet) -> tuple[np.ndarray, np.ndarray]:
+    """Get the number of drops per "minute" by counting IR flags set.
+
+    Here a "minute" is really 60 * 1.025 seconds, or 1.025 minutes.
+
+    Parameters
+    ----------
+    mon : MonDataSet
+        Dataset of MON data from get_mon_dataset()
+
+    Returns
+    -------
+    dt_mins : np.ndarray
+        Array of dt_min values (minutes since perigee) for each minute
+    kalman_drops : np.ndarray
+        Array of number of kalman drops per minute
+    """
     bins = np.arange(-30, 31, 1.025)
     kalman_drops = []
     dt_mins = []
@@ -319,24 +444,7 @@ def get_kalman_drops_per_minute(mon):
     return np.array(dt_mins), np.array(kalman_drops)
 
 
-# Copied from kalman-drops-perigee-evolution.ipynb but added `label` argument
-def plot_kalman_drops_old(kalman_drops_data, ax, alpha=1.0, title=None, label=None):
-    _, _, times, n_drops, colors = kalman_drops_data
-    scat = ax.scatter(
-        times / 60,
-        n_drops.clip(None, 160),
-        s=10,
-        c=colors,
-        alpha=alpha,
-        label=label,
-    )
-    # set major ticks every 10 minutes
-    ax.xaxis.set_major_locator(plt.MultipleLocator(10))
-    ax.set_xlabel("Time from perigee (minutes)")
-    return scat
-
-
-def get_kalman_drops_data(mon, idx):
+def get_kalman_drops_nman(mon, idx):
     """Get kalman_drops data in the peculiar form for plot_kalman_drops"""
     dt_mins, kalman_drops = get_kalman_drops_per_minute(mon)
     color = ["r", "m", "b", "g", "k"][idx % 5]
@@ -344,20 +452,6 @@ def get_kalman_drops_data(mon, idx):
     times = np.array(dt_mins) * 60
     kalman_drops_data = (mon["start"], mon["stop"], times, kalman_drops, colors)
     return kalman_drops_data
-
-
-def plot_kalman_drops_all(kalman_drops_data_list, savefig=None):
-    fig, ax = plt.subplots(1, 1, figsize=(12, 3.5))
-    for kalman_drops_data in kalman_drops_data_list:
-        plot_kalman_drops_old(
-            kalman_drops_data,
-            ax,
-            alpha=1.0,
-        )
-    ax.set_title("Kalman drops per minute")
-
-    if savefig:
-        fig.savefig(savefig)
 
 
 def reshape_to_n_sample_2d(arr, n_sample=60):
@@ -385,7 +479,7 @@ def process_dat(dat, n_sample=60):
     return time_means[ok], n_lost_means[ok]
 
 
-def get_kalman_drops(start, stop, duration=100):
+def get_kalman_drops_npnt(start, stop, duration=100):
     start = CxoTime(start)
     stop = CxoTime(stop)
     rad_zones = kadi.events.rad_zones.filter(start, stop).table
@@ -469,25 +563,40 @@ def main(args=None):
     start = cxotime_reldate(opt.start)
     stop = cxotime_reldate(opt.stop)
 
+    # Intervals of NMAN within 40 minutes of perigee
     manvrs_perigee = get_manvrs_perigee(start, stop)
 
+    # Get list of monitor window data for each perigee maneuver
     mons = []
     for manvr in manvrs_perigee:
-        mon = get_mon_dataset(manvr["datestart"], manvr["datestop"])
+        mon = get_mon_dataset(
+            manvr["datestart"],
+            manvr["datestop"],
+            opt.ir_thresholds_start,
+            opt.ir_thresholds_stop,
+            opt.data_dir,
+        )
         mons.append(mon)
 
+    # Process monitor window (NMAN) data into kalman drops per minute for each maneuver.
+    # This uses idx to assign a different color to each maneuver (in practice each
+    # perigee).
     kalman_drops_nman_list = []
     for idx, mon in enumerate(mons):
-        kalman_drops_data = get_kalman_drops_data(mon, idx)
-        kalman_drops_nman_list.append(kalman_drops_data)
+        kalman_drops_nman = get_kalman_drops_nman(mon, idx)
+        kalman_drops_nman_list.append(kalman_drops_nman)
 
-    kalman_drops_npnt = get_kalman_drops(start, stop)
+    # Process NPNT data for the entire time range into kalman drops per minute. This
+    # assigns different colors to each perigee.
+    kalman_drops_npnt = get_kalman_drops_npnt(start, stop)
 
     outfile = Path(opt.data_dir) / f"mon_win_kalman_drops_{opt.start}_{opt.stop}.png"
     title = f"Perigee Kalman drops per minute {start.date[:8]} to {stop.date[:8]}"
     plot_mon_win_and_aokalstr_composite(
         kalman_drops_npnt, kalman_drops_nman_list, outfile=outfile, title=title
     )
+
+    clean_aca_images_cache(start, stop, opt.data_dir)
 
 
 if __name__ == "__main__":
