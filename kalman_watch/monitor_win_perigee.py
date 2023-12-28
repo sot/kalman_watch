@@ -13,11 +13,13 @@ cache the MAUDE images in the ``<data_dir>/aca_imgs_cache/`` directory.
 
 import argparse
 import functools
-from pathlib import Path
 import re
+from dataclasses import dataclass
+from pathlib import Path
 from typing import TypeAlias
 
 import astropy.units as u
+import kadi.events
 import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.style
@@ -31,7 +33,6 @@ from cheta.utils import logical_intervals
 from cxotime import CxoTime, CxoTimeLike, date2secs
 from kadi.commands import get_cmds, get_observations, get_starcats
 from ska_helpers.logging import basic_logger
-import kadi.events
 
 from kalman_watch import __version__
 
@@ -49,7 +50,16 @@ EARTH_BLOCKS = [
 
 # Typing hint for a table of images coming from chandra_aca.maude_decom.get_aca_images()
 ACAImagesTable: TypeAlias = Table
-MonDataSet: TypeAlias = dict[str]
+MonDataSet: TypeAlias = dict[str]  # TODO: use dataclass
+
+
+@dataclass
+class KalmanDropsData:
+    start: CxoTime
+    stop: CxoTime
+    times: np.ndarray
+    kalman_drops: np.ndarray
+    colors: list
 
 
 def get_opt() -> argparse.ArgumentParser:
@@ -197,15 +207,28 @@ def get_aca_images_cached(
     return out
 
 
-def clean_aca_images_cache(n_cache, data_dir):
-    """Clean the ACA images cache directory."""
+def clean_aca_images_cache(n_cache: int, data_dir: Path):
+    """Keep only the most recent ``n_cache`` files based on file creation time.
+
+    Parameters
+    ----------
+    n_cache : int
+        Number of cached files to keep
+    data_dir : Path
+        Directory root for cached images
+
+    Returns
+    -------
+    None
+    """
     logger.info(f"Cleaning ACA images cache to keep most recent {n_cache} files")
     data_dir = Path(data_dir)
     cache_dir = data_dir / "aca_imgs_cache"
 
     # Keep the most recent n_cache files based on file creation time
     cache_files = sorted(
-        cache_dir.glob("aca_imgs_*.fits.gz"), key=lambda x: x.stat().st_mtime
+        cache_dir.glob("aca_imgs_*.fits.gz"),
+        key=lambda x: x.stat().st_mtime,
     )
     for path in cache_files[:-n_cache]:
         logger.info(f"Deleting {path}")
@@ -457,23 +480,56 @@ def get_kalman_drops_per_minute(mon: MonDataSet) -> tuple[np.ndarray, np.ndarray
     return np.array(dt_mins), np.array(kalman_drops)
 
 
-def get_kalman_drops_nman(mon, idx):
-    """Get kalman_drops data in the peculiar form for plot_kalman_drops"""
+def get_kalman_drops_nman(mon: MonDataSet, idx: int):
+    """Get kalman_drops data in the peculiar form for plot_kalman_drops.
+
+    Parameters
+    ----------
+    mon : MonDataSet
+        Dataset of MON data from get_mon_dataset()
+    idx : int
+        Index of this perigee (used to assign a color)
+
+    Returns
+    -------
+    kalman_drops_data : KalmanDropsData
+    """
     dt_mins, kalman_drops = get_kalman_drops_per_minute(mon)
     color = ["r", "m", "b", "g", "k"][idx % 5]
     colors = [color] * len(dt_mins)
     times = np.array(dt_mins) * 60
-    kalman_drops_data = (mon["start"], mon["stop"], times, kalman_drops, colors)
+    kalman_drops_data = KalmanDropsData(
+        mon["start"], mon["stop"], times, kalman_drops, colors
+    )
     return kalman_drops_data
 
 
-def reshape_to_n_sample_2d(arr, n_sample=60):
+def _reshape_to_n_sample_2d(arr: np.ndarray, n_sample: int = 60) -> np.ndarray:
+    """Reshape 1D array to 2D with one row per n_sample samples."""
     arr = arr[: -(arr.size % n_sample)]
     arr = arr.reshape(-1, n_sample)
     return arr
 
 
-def process_dat(dat, n_sample=60):
+def get_binned_drops_from_npnt_tlm(
+    dat: fetch.MSID, n_sample: int = 60
+) -> tuple[np.ndarray, np.ndarray]:
+    """Get the number of kalman drops per minute from NPNT telemetry.
+
+    Parameters
+    ----------
+    dat : fetch.MSID
+        MSIDset of NPNT telemetry
+    n_sample : int
+        Number of 1.025 sec samples per bin (default=60)
+
+    Returns
+    -------
+    time_means : np.ndarray
+        Array of time means for each minute
+    n_lost_means : np.ndarray
+        Array of number of kalman drops per ``n_sample`` samples
+    """
     dat = dat.interpolate(times=dat["aokalstr"].times, copy=True)
     n_kalmans = dat["aokalstr"].raw_vals.astype(float)
     times = dat.times
@@ -481,8 +537,8 @@ def process_dat(dat, n_sample=60):
     n_kalmans[~ok] = np.nan
     # Resize n_kalmans to be a multiple of n_sample and then reshape to be 2D with one
     # row per 60 samples
-    n_kalmans = reshape_to_n_sample_2d(n_kalmans, n_sample)
-    times = reshape_to_n_sample_2d(times, n_sample)
+    n_kalmans = _reshape_to_n_sample_2d(n_kalmans, n_sample)
+    times = _reshape_to_n_sample_2d(times, n_sample)
     n_lost_means = np.nansum(8 - n_kalmans, axis=1)
     time_means = np.nanmean(times, axis=1)
     # Count the number of nans in each row
@@ -492,7 +548,22 @@ def process_dat(dat, n_sample=60):
     return time_means[ok], n_lost_means[ok]
 
 
-def get_kalman_drops_npnt(start, stop, duration=100):
+def get_kalman_drops_npnt(start, stop, duration=100) -> KalmanDropsData:
+    """Get the number of kalman drops per minute from NPNT telemetry.
+
+    Parameters
+    ----------
+    start : CxoTimeLike
+        Start time
+    stop : CxoTimeLike
+        Stop time
+    duration : int
+        Duration around perigee in minutes (default=100)
+
+    Returns
+    -------
+    kalman_drops_data : KalmanDropsData
+    """
     start = CxoTime(start)
     stop = CxoTime(stop)
     rad_zones = kadi.events.rad_zones.filter(start, stop).table
@@ -506,12 +577,12 @@ def get_kalman_drops_npnt(start, stop, duration=100):
             msids, perigee_time - duration * u.min, perigee_time + duration * u.min
         )
         if len(dat["aokalstr"]) > 200:
-            times, n_drops = process_dat(dat)
+            times, n_drops = get_binned_drops_from_npnt_tlm(dat)
             times_list.append(times - perigee_time.secs)
             n_drops_list.append(n_drops)
             colors_list.append([f"C{idx}"] * len(times))
 
-    return (
+    return KalmanDropsData(
         start,
         stop,
         np.concatenate(times_list),
@@ -520,19 +591,46 @@ def get_kalman_drops_npnt(start, stop, duration=100):
     )
 
 
-def plot_kalman_drops(kalman_drops_data, ax, alpha=1.0, title=None, marker_size=10):
-    start, stop, times, n_drops, colors = kalman_drops_data
+def plot_kalman_drops(
+    kalman_drops_data: KalmanDropsData,
+    ax,
+    alpha: float = 1.0,
+    title: str | None = None,
+    marker_size: float = 10,
+) -> matplotlib.collections.PathCollection:
+    """Plot the number of kalman drops per minute.
+
+    Parameters
+    ----------
+    kalman_drops_data : KalmanDropsData
+        Output of get_kalman_drops_nman or get_kalman_drops_npnt
+    ax : matplotlib.axes.Axes
+        Matplotlib axes
+    alpha : float
+        Alpha value for scatter plot
+    title : str, None
+        Title for plot (default=None)
+    marker_size : float
+        Marker size for scatter plot (default=10)
+
+    Returns
+    -------
+    scat : matplotlib.collections.PathCollection
+        Scatter plot collection
+    """
     scat = ax.scatter(
-        times / 60,
-        n_drops.clip(None, 160),
+        kalman_drops_data.times / 60,
+        kalman_drops_data.kalman_drops.clip(None, 160),
         s=marker_size,
-        c=colors,
+        c=kalman_drops_data.colors,
         alpha=alpha,
     )
     # set major ticks every 10 minutes
     ax.xaxis.set_major_locator(plt.MultipleLocator(10))
     if title is None:
-        title = f"Kalman drops per minute near perigee {start.iso[:7]}"
+        title = (
+            f"Kalman drops per minute near perigee {kalman_drops_data.start.iso[:7]}"
+        )
     if title:
         ax.set_title(title)
     ax.set_xlabel("Time from perigee (minutes)")
@@ -542,6 +640,23 @@ def plot_kalman_drops(kalman_drops_data, ax, alpha=1.0, title=None, marker_size=
 def plot_mon_win_and_aokalstr_composite(
     kalman_drops_npnt, kalman_drops_nman_list, outfile=None, title=""
 ):
+    """Plot the monitor window and kalman drops data.
+
+    Parameters
+    ----------
+    kalman_drops_npnt : KalmanDropsData
+        Output of get_kalman_drops_npnt
+    kalman_drops_nman_list : list[KalmanDropsData]
+        Output of get_kalman_drops_nman
+    outfile : str
+        Output file name (default=None)
+    title : str
+        Title for plot (default="")
+
+    Returns
+    -------
+    None
+    """
     fig, ax = plt.subplots(1, 1, figsize=(10, 3))
 
     plot_kalman_drops(
@@ -563,6 +678,21 @@ def plot_mon_win_and_aokalstr_composite(
 
 
 def cxotime_reldate(date):
+    """Parse a date string that can contain a relative time and return a CxoTime.
+
+    The relative time matches this regex: ``[-+]? [0-9]* \.? [0-9]+ d``. Examples
+    include ``-45d`` and ``+1.5d`` (-45 days and +1.5 days from now, respectively).
+
+    Parameters
+    ----------
+    date : str
+        Date string
+
+    Returns
+    -------
+    out : CxoTime
+        CxoTime object
+    """
     if re.match("[-+]? [0-9]* \.? [0-9]+ d", date, re.VERBOSE):
         dt = float(date[:-1])
         out = CxoTime.now() + dt * u.d
@@ -595,7 +725,7 @@ def main(args=None):
     # Process monitor window (NMAN) data into kalman drops per minute for each maneuver.
     # This uses idx to assign a different color to each maneuver (in practice each
     # perigee).
-    kalman_drops_nman_list = []
+    kalman_drops_nman_list: list[KalmanDropsData] = []
     for idx, mon in enumerate(mons):
         kalman_drops_nman = get_kalman_drops_nman(mon, idx)
         kalman_drops_nman_list.append(kalman_drops_nman)
