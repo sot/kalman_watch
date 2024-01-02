@@ -133,6 +133,10 @@ def get_manvrs_perigee(start: CxoTimeLike, stop: CxoTimeLike) -> Table:
     perigee_dates = cmds[cmds["event_type"] == "EPERIGEE"]["date"]
     pcad_mode = fetch.Msid("aopcadmd", start, stop)
 
+    # TODO: with the "intervals" refactor WIP this could be done more nicely by taking
+    # the intersection of the maneuvers and the Earth block intervals. Instead here we
+    # stub in a 3rd state "EART" for Earth block intervals and report every interval
+    # even though almost all of them are not during a perigee maneuver.
     logger.info(f"Getting intervals of Earth blocks from {start.date} to {stop.date}")
     blocks = get_earth_blocks(start, stop)
     for block in blocks:
@@ -154,7 +158,6 @@ def get_manvrs_perigee(start: CxoTimeLike, stop: CxoTimeLike) -> Table:
         manvrs_perigee.append(manvrs[ok])
 
     manvrs_perigee = vstack(manvrs_perigee)
-
     return manvrs_perigee
 
 
