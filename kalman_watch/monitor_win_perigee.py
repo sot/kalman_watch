@@ -231,6 +231,10 @@ def clean_aca_images_cache(n_cache: int, data_dir: Path):
         path.unlink()
 
 
+class NotEnoughImagesError(Exception):
+    """Not enough images to process."""
+
+
 def process_imgs(imgs: Table, slot: int) -> ACAImagesTable:
     """Process MON data images for a single slot.
 
@@ -255,6 +259,11 @@ def process_imgs(imgs: Table, slot: int) -> ACAImagesTable:
     """
     # Select MON data for this slot
     imgs_slot = imgs[(imgs["IMGNUM"] == slot) & (imgs["IMGFUNC"] == 2)]
+    if len(imgs_slot) < 10:
+        raise NotEnoughImagesError(
+            f"Not enough images for slot {slot} found {len(imgs_slot)})"
+        )
+
     for name in imgs_slot.colnames:
         if hasattr(imgs_slot[name], "mask"):
             imgs_slot[name] = np.array(imgs_slot[name])
@@ -375,6 +384,8 @@ def get_hits(
             "pixels": hit_pixel,
         }
         hits.append(hit)
+    if len(hits) == 0:
+        breakpoint()
     hits = Table(hits)
     hits["hit_idx"] = np.arange(len(hits))
 
@@ -432,7 +443,12 @@ def get_mon_dataset(
     mon = {}
     mons = []
     for slot in range(8):
-        mons.append(process_imgs(imgs, slot))
+        try:
+            mons.append(process_imgs(imgs, slot))
+        except NotEnoughImagesError as err:
+            logger.warning(err)
+    if len(mons) == 0:
+        raise NotEnoughImagesError(f"No image data between {start} and {stop}")
     mon["imgs"] = vstack(mons)
     mon["imgs"].sort("TIME")
     mon["imgs"]["img_idx"] = np.arange(len(mon["imgs"]))
@@ -708,15 +724,18 @@ def main(args=None):
     # Get list of monitor window data for each perigee maneuver
     mons = []
     for manvr in manvrs_perigee:
-        mon = get_mon_dataset(
-            manvr["datestart"],
-            manvr["datestop"],
-            opt.ir_thresholds_start,
-            opt.ir_thresholds_stop,
-            opt.data_dir,
-            cache=opt.n_cache > 0,
-        )
-        mons.append(mon)
+        try:
+            mon = get_mon_dataset(
+                manvr["datestart"],
+                manvr["datestop"],
+                opt.ir_thresholds_start,
+                opt.ir_thresholds_stop,
+                opt.data_dir,
+                cache=opt.n_cache > 0,
+            )
+            mons.append(mon)
+        except NotEnoughImagesError as err:
+            logger.warning(err)
 
     # Process monitor window (NMAN) data into kalman drops per minute for each maneuver.
     # This uses idx to assign a different color to each maneuver (in practice each
