@@ -28,9 +28,10 @@ import scipy.signal
 from astropy.table import Table, vstack
 from chandra_aca.maude_decom import get_aca_images
 from chandra_aca.transform import mag_to_count_rate
+from chandra_aca.planets import get_earth_blocks
 from cheta import fetch
 from cheta.utils import logical_intervals
-from cxotime import CxoTime, CxoTimeLike, date2secs
+from cxotime import CxoTime, CxoTimeLike
 from kadi.commands import get_cmds, get_observations, get_starcats
 from ska_helpers.logging import basic_logger
 
@@ -40,13 +41,6 @@ matplotlib.style.use("bmh")
 
 logger = basic_logger(__name__, level="INFO")
 
-
-# TODO: replace with generic Earth block code in chandra_aca.planets (coded in
-# 2023-11 quarterly ATM).
-EARTH_BLOCKS = [
-    ("2023:297:12:23:00", "2023:297:12:48:37"),
-    ("2023:300:03:49:00", "2023:300:04:16:40"),
-]
 
 # Typing hint for a table of images coming from chandra_aca.maude_decom.get_aca_images()
 ACAImagesTable: TypeAlias = Table
@@ -133,18 +127,20 @@ def get_manvrs_perigee(start: CxoTimeLike, stop: CxoTimeLike) -> Table:
     """
     start = CxoTime(start)
     stop = CxoTime(stop)
+
     logger.info(f"Getting maneuvers from {start.date} to {stop.date}")
-
     cmds = get_cmds(start, stop)
-
     perigee_dates = cmds[cmds["event_type"] == "EPERIGEE"]["date"]
-
     pcad_mode = fetch.Msid("aopcadmd", start, stop)
 
-    for block_start, block_stop in EARTH_BLOCKS:
-        idx0, idx1 = pcad_mode.times.searchsorted(
-            [date2secs(block_start), date2secs(block_stop)]
+    logger.info(f"Getting intervals of Earth blocks from {start.date} to {stop.date}")
+    blocks = get_earth_blocks(start, stop)
+    for block in blocks:
+        logger.info(
+            f" Excluding Earth block from {block['datestart']} "
+            f"to {block['datestop']}"
         )
+        idx0, idx1 = pcad_mode.times.searchsorted([block["tstart"], block["tstop"]])
         pcad_mode.vals[idx0:idx1] = "EART"
 
     manvrs = logical_intervals(pcad_mode.times, pcad_mode.vals == "NMAN")
