@@ -13,22 +13,25 @@ cache the MAUDE images in the ``<data_dir>/aca_imgs_cache/`` directory.
 
 import argparse
 import functools
+import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TypeAlias
 
+os.environ["MPLBACKEND"] = "Agg"
+
 import astropy.units as u
 import kadi.events
-import matplotlib
+import matplotlib.collections
 import matplotlib.pyplot as plt
 import matplotlib.style
 import numpy as np
 import scipy.signal
 from astropy.table import Table, vstack
 from chandra_aca.maude_decom import get_aca_images
-from chandra_aca.transform import mag_to_count_rate
 from chandra_aca.planets import get_earth_blocks
+from chandra_aca.transform import mag_to_count_rate
 from cheta import fetch
 from cheta.utils import logical_intervals
 from cxotime import CxoTime, CxoTimeLike
@@ -762,5 +765,4 @@ def main(args=None):
 
 
 if __name__ == "__main__":
-    matplotlib.use("Agg")
     main()
