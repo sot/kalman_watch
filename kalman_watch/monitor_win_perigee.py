@@ -692,7 +692,7 @@ def plot_mon_win_and_aokalstr_composite(
     fig.tight_layout()
 
     if outfile:
-        fig.savefig(outfile)
+        fig.savefig(outfile, dpi=200)
 
 
 def cxotime_reldate(date):
