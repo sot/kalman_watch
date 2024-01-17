@@ -1,3 +1,4 @@
+# Licensed under a 3-clause BSD style license - see LICENSE.rst
 """Process telemetry and find intervals of low Kalman stars.
 
 - Intervals are stored in <data_dir>/low_kalman_events.ecsv.

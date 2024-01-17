@@ -1,3 +1,4 @@
+# Licensed under a 3-clause BSD style license - see LICENSE.rst
 """Watch Kalman star data during perigee passages.
 """
 
@@ -325,7 +326,7 @@ def get_index_html_year(stats_all, year):
     # Strip out the year/ from dirname since we are already in the year/ dir
     stats_year["dirname"] = [dirname[5:] for dirname in stats_year["dirname"]]
     prev = f"../{year - 1}" if (year - 1) in years_unique else None
-    index = f"../"
+    index = "../"
     next = f"../{year + 1}" if (year + 1) in years_unique else None
     description = f"{year}"
     html = get_index_list_page(
@@ -386,7 +387,7 @@ def get_index_list_page(
 
 
 def send_process_mail(opt, evts_perigee):
-    subject = f"kalman_watch: long drop interval(s)"
+    subject = "kalman_watch: long drop interval(s)"
     lines = ["Long drop interval(s) found for the following perigee events:"]
     for evt in evts_perigee:
         if len(evt.low_kalmans) > 0:
