@@ -1,7 +1,5 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
-"""Watch Kalman star data during perigee passages.
-"""
-
+"""Watch Kalman star data during perigee passages."""
 
 import argparse
 import calendar
@@ -291,10 +289,7 @@ def get_stats(evts_perigee) -> Table:
     :returns: Table
         Table of kalman perigee stats
     """
-    rows = []
-
-    for evt in reversed(evts_perigee):
-        rows.append(evt.info)
+    rows = [evt.info for evt in reversed(evts_perigee)]
 
     out = Table(rows=rows)
     return out
@@ -352,7 +347,7 @@ def get_index_html_recent(stats_all):
     html = get_index_list_page(
         template,
         stats_recent,
-        years=reversed(sorted(set(years_all))),
+        years=sorted(set(years_all), reverse=True),
         description=description,
     )
     return html
@@ -389,9 +384,11 @@ def get_index_list_page(
 def send_process_mail(opt, evts_perigee):
     subject = "kalman_watch: long drop interval(s)"
     lines = ["Long drop interval(s) found for the following perigee events:"]
-    for evt in evts_perigee:
-        if len(evt.low_kalmans) > 0:
-            lines.append(f"{evt.dirname} {evt.perigee.date}")
+    lines.extend(
+        f"{evt.dirname} {evt.perigee.date}"
+        for evt in evts_perigee
+        if len(evt.low_kalmans) > 0
+    )
     text = "\n".join(lines)
     send_mail(LOGGER, opt, subject, text, __file__)
 
@@ -699,9 +696,7 @@ class EventPerigee:
         perigee_times = perigee_times.round(1)
         aokalstr = self.data["aokalstr"]
 
-        fig = make_subplots(
-            rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.1
-        )  # type: pgo.FigureWidget
+        fig = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.1)  # type: pgo.FigureWidget
 
         for obs, color in zip(self.obss, cycle(COLOR_CYCLE)):
             obs_tstart_rel = CxoTime(obs["obs_start"]).secs - self.perigee.cxcsec
