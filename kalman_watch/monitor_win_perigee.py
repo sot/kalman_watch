@@ -819,7 +819,7 @@ def main(args=None):
     kalman_drops_npnt = get_kalman_drops_npnt(start, stop)
 
     outfile = Path(opt.data_dir) / f"mon_win_kalman_drops_{opt.start}_{opt.stop}.png"
-    title = f"Perigee Kalman drops per minute {start.date[:8]} to {stop.date[:8]}"
+    title = f"IR flag fraction {start.date[:8]} to {stop.date[:8]}"
     plot_mon_win_and_aokalstr_composite(
         kalman_drops_npnt, kalman_drops_nman_list, outfile=outfile, title=title
     )
