@@ -89,6 +89,11 @@ def get_opt() -> argparse.ArgumentParser:
         help="Stop date for sampling guide stars for IR thresholds",
     )
     parser.add_argument(
+        "--skip-mon",
+        action="store_true",
+        help="Skip monitor window data (mostly for testing)",
+    )
+    parser.add_argument(
         "--n-cache",
         type=int,
         default=30,
@@ -788,7 +793,7 @@ def main(args=None):
     stop = cxotime_reldate(opt.stop)
 
     # Intervals of NMAN within 40 minutes of perigee
-    manvrs_perigee = get_manvrs_perigee(start, stop)
+    manvrs_perigee = [] if opt.skip_mon else get_manvrs_perigee(start, stop)
 
     # Get list of monitor window data for each perigee maneuver
     mons = []
