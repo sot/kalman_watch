@@ -1,14 +1,19 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
 
-"""Perigee monitor window data and kalman drops
+"""IR flag fraction from perigee monitor window data (NMAN) and ACA telemetry (NPNT).
 
 Generate a trending plot which combines the perigee monitor window data during NMAN with
-the kalman drops data (from AOKALSTR) during NPNT. This is used to evaluate the
+the IR flag data (from AOACIIR<n>) during NPNT. This is used to evaluate the
 evolution of the high ionizing radiation (IR) zone during perigee.
 
 This is normally run as a script which by default generates a plot
 ``<data_dir>/mon_win_kalman_drops_-45d_-1d.png`` in the current directory. It will also
 cache the MAUDE images in the ``<data_dir>/aca_imgs_cache/`` directory.
+
+NOTE: This script was originally written using AOKALSTR telemetry as a proxy for the IR
+flag data. This was later replaced with the more direct AOACIIR<n> telemetry. In many
+places there are references to Kalman drops. Generally speaking that should be taken as
+a synonym for the IR flag fraction.
 """
 
 import argparse
@@ -490,7 +495,7 @@ def get_kalman_drops_per_minute(mon: MonDataSet) -> tuple[np.ndarray, np.ndarray
     kalman_drops : np.ndarray
         Array of number of kalman drops per minute scaled
     """
-    bins = np.arange(-30, 31, 1.025)
+    bins = np.arange(-100, 100, 1.025)
     kalman_drops = []
     dt_mins = []
     for dt_min0, dt_min1 in zip(bins[:-1], bins[1:]):
@@ -543,7 +548,7 @@ def _reshape_to_n_sample_2d(arr: np.ndarray, n_sample: int = 60) -> np.ndarray:
 def get_binned_drops_from_event_perigee(
     ep: EventPerigee,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Get the number of kalman drops per "minute" from NPNT telemetry.
+    """Get the fraction of IR flags per "minute" from NPNT telemetry.
 
     Here a "minute" is really 60 * 1.025 seconds = 61.5, or 1.025 minutes. This
     corresponds to exactly 30 ACA image readouts (2.05 sec per image) per "minute".
@@ -557,8 +562,8 @@ def get_binned_drops_from_event_perigee(
     -------
     time_means : np.ndarray
         Array of mean time from perigee (sec) in each bin
-    n_lost_sums : np.ndarray
-        Array of total number of kalman drops in each bin
+    ir_flag_fracs : np.ndarray
+        Array of fraction of IR flags set in each bin
     """
     # Select only data in AOPCADMD in NPNT and AOACASEQ in KALM
     npnt_kalm = ep.data["npnt_kalm"]
@@ -637,7 +642,7 @@ def get_perigee_events(
 
 
 def get_kalman_drops_npnt(start, stop, duration=100) -> KalmanDropsData:
-    """Get the number of kalman drops per minute from NPNT telemetry.
+    """Get the fraction of IR flags set per minute from NPNT telemetry.
 
     Parameters
     ----------
@@ -683,7 +688,7 @@ def plot_kalman_drops(
     title: str | None = None,
     marker_size: float = 10,
 ) -> matplotlib.collections.PathCollection:
-    """Plot the number of kalman drops per minute.
+    """Plot the fraction of IR flags set per minute.
 
     Parameters
     ----------
@@ -725,7 +730,7 @@ def plot_kalman_drops(
 def plot_mon_win_and_aokalstr_composite(
     kalman_drops_npnt, kalman_drops_nman_list, outfile=None, title=""
 ):
-    """Plot the monitor window and kalman drops data.
+    """Plot the monitor window (NMAN) and NPNT IR flags fraction data.
 
     Parameters
     ----------
