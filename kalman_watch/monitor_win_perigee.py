@@ -1,14 +1,19 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
 
-"""Perigee monitor window data and kalman drops
+"""IR flag fraction from perigee monitor window data (NMAN) and ACA telemetry (NPNT).
 
 Generate a trending plot which combines the perigee monitor window data during NMAN with
-the kalman drops data (from AOKALSTR) during NPNT. This is used to evaluate the
+the IR flag data (from AOACIIR<n>) during NPNT. This is used to evaluate the
 evolution of the high ionizing radiation (IR) zone during perigee.
 
 This is normally run as a script which by default generates a plot
 ``<data_dir>/mon_win_kalman_drops_-45d_-1d.png`` in the current directory. It will also
 cache the MAUDE images in the ``<data_dir>/aca_imgs_cache/`` directory.
+
+NOTE: This script was originally written using AOKALSTR telemetry as a proxy for the IR
+flag data. This was later replaced with the more direct AOACIIR<n> telemetry. In many
+places there are references to Kalman drops. Generally speaking that should be taken as
+a synonym for the IR flag fraction.
 """
 
 import argparse
@@ -39,6 +44,7 @@ from kadi.commands import get_cmds, get_observations, get_starcats
 from ska_helpers.logging import basic_logger
 
 from kalman_watch import __version__
+from kalman_watch.kalman_perigee_mon import EventPerigee
 
 matplotlib.style.use("bmh")
 
@@ -86,6 +92,11 @@ def get_opt() -> argparse.ArgumentParser:
         "--ir-thresholds-stop",
         default="2023:200",
         help="Stop date for sampling guide stars for IR thresholds",
+    )
+    parser.add_argument(
+        "--skip-mon",
+        action="store_true",
+        help="Skip monitor window data (mostly for testing)",
     )
     parser.add_argument(
         "--n-cache",
@@ -390,8 +401,7 @@ def get_hits(
             "pixels": hit_pixel,
         }
         hits.append(hit)
-    if len(hits) == 0:
-        breakpoint()
+
     hits = Table(hits)
     hits["hit_idx"] = np.arange(len(hits))
 
@@ -471,7 +481,7 @@ def get_mon_dataset(
 def get_kalman_drops_per_minute(mon: MonDataSet) -> tuple[np.ndarray, np.ndarray]:
     """Get the number of drops per "minute" by counting IR flags set.
 
-    Here a "minute" is really 60 * 1.025 seconds, or 1.025 minutes.
+    Here a "minute" is really 60 * 1.025 seconds = 61.5, or 1.025 minutes.
 
     Parameters
     ----------
@@ -483,15 +493,21 @@ def get_kalman_drops_per_minute(mon: MonDataSet) -> tuple[np.ndarray, np.ndarray
     dt_mins : np.ndarray
         Array of dt_min values (minutes since perigee) for each minute
     kalman_drops : np.ndarray
-        Array of number of kalman drops per minute
+        Array of number of kalman drops per minute scaled
     """
-    bins = np.arange(-30, 31, 1.025)
+    bins = np.arange(-100, 100, 1.025)
     kalman_drops = []
     dt_mins = []
     for dt_min0, dt_min1 in zip(bins[:-1], bins[1:]):
-        ok = (mon["hits"]["dt_min"] >= dt_min0) & (mon["hits"]["dt_min"] < dt_min1)
-        n_drops = np.sum(mon["hits"][ok]["ir_flag"])
-        if n_drops > 0:
+        has_imgs = (mon["imgs"]["dt_min"] >= dt_min0) & (
+            mon["imgs"]["dt_min"] < dt_min1
+        )
+        # For a fully-sampled "minute" there are 15 ACA images per slot (4.1 sec per
+        # image) times 8 slots = 120 images. Require at least half of images present
+        # in order to return a count, otherwise just no data.
+        if (n_imgs := np.count_nonzero(has_imgs)) > 60:
+            ok = (mon["hits"]["dt_min"] >= dt_min0) & (mon["hits"]["dt_min"] < dt_min1)
+            n_drops = np.sum(mon["hits"][ok]["ir_flag"]) / n_imgs
             kalman_drops.append(n_drops)
             dt_mins.append((dt_min0 + dt_min1) / 2)
 
@@ -529,45 +545,104 @@ def _reshape_to_n_sample_2d(arr: np.ndarray, n_sample: int = 60) -> np.ndarray:
     return arr
 
 
-def get_binned_drops_from_npnt_tlm(
-    dat: fetch.MSID, n_sample: int = 60
+def get_binned_drops_from_event_perigee(
+    ep: EventPerigee,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Get the number of kalman drops per minute from NPNT telemetry.
+    """Get the fraction of IR flags per "minute" from NPNT telemetry.
+
+    Here a "minute" is really 60 * 1.025 seconds = 61.5, or 1.025 minutes. This
+    corresponds to exactly 30 ACA image readouts (2.05 sec per image) per "minute".
 
     Parameters
     ----------
-    dat : fetch.MSID
-        MSIDset of NPNT telemetry
-    n_sample : int
-        Number of 1.025 sec samples per bin (default=60)
+    ep : EventPerigee
+        Perigee event object with relevant ACA telemetry from one perigee
 
     Returns
     -------
     time_means : np.ndarray
-        Array of time means for each minute
-    n_lost_means : np.ndarray
-        Array of number of kalman drops per ``n_sample`` samples
+        Array of mean time from perigee (sec) in each bin
+    ir_flag_fracs : np.ndarray
+        Array of fraction of IR flags set in each bin
     """
-    dat = dat.interpolate(times=dat["aokalstr"].times, copy=True)
-    n_kalmans = dat["aokalstr"].raw_vals.astype(float)
-    times = dat.times
-    ok = (dat["aopcadmd"].vals == "NPNT") & (dat["aoacaseq"].vals == "KALM")
-    n_kalmans[~ok] = np.nan
-    # Resize n_kalmans to be a multiple of n_sample and then reshape to be 2D with one
-    # row per 60 samples
-    n_kalmans = _reshape_to_n_sample_2d(n_kalmans, n_sample)
-    times = _reshape_to_n_sample_2d(times, n_sample)
-    n_lost_means = np.nansum(8 - n_kalmans, axis=1)
-    time_means = np.nanmean(times, axis=1)
-    # Count the number of nans in each row
-    n_nans = np.sum(np.isnan(n_kalmans), axis=1)
-    ok = n_nans == 0
+    # Select only data in AOPCADMD in NPNT and AOACASEQ in KALM
+    npnt_kalm = ep.data["npnt_kalm"]
+    # Time from perigee in seconds
+    times_from_perigee = ep.data["perigee_times"][npnt_kalm]
+    if len(times_from_perigee) == 0:
+        return np.array([]), np.array([])
+    ir_count = np.zeros(times_from_perigee.shape, dtype=int)
+    n_samp = np.zeros(times_from_perigee.shape, dtype=int)
 
-    return time_means[ok], n_lost_means[ok]
+    # Count number of IR flags set for each slot when slot is tracking
+    for slot in range(8):
+        ir_count[:] += np.where(
+            ep.data[f"aca_ir{slot}"][npnt_kalm]
+            & ep.data[f"aca_track{slot}"][npnt_kalm],
+            1,
+            0,
+        )
+
+    # Count number of slot-samples when slot is tracking
+    for slot in range(8):
+        n_samp[:] += np.where(
+            ep.data[f"aca_track{slot}"][npnt_kalm],
+            1,
+            0,
+        )
+
+    tbl = Table()
+    tbl["idx"] = (times_from_perigee // (60 * 1.025)).astype(int)
+    tbl["times_from_perigee"] = times_from_perigee
+    tbl["ir_count"] = ir_count
+    tbl["n_samp"] = n_samp
+    tbl_grp = tbl.group_by("idx")
+
+    time_means = []
+    ir_flag_fracs = []
+    for i0, i1 in zip(tbl_grp.groups.indices[:-1], tbl_grp.groups.indices[1:]):
+        # For a fully-sampled "minute" there are 30 ACA telemetry samples (2.05 sec per
+        # sample) times 8 slots = 240 potential samples. Require at least half of
+        # samples in a "minute" in order to return a count, otherwise just no data.
+        n_samp = np.sum(tbl_grp["n_samp"][i0:i1])
+        if n_samp > 120:
+            time_means.append(np.mean(tbl_grp["times_from_perigee"][i0:i1]))
+            # Calculate fraction of available samples that have IR flag set
+            ir_flag_fracs.append(np.sum(tbl_grp["ir_count"][i0:i1]) / n_samp)
+
+    return np.array(time_means), np.array(ir_flag_fracs)
+
+
+def get_perigee_events(
+    perigee_times: np.ndarray, duration=100
+) -> list[EventPerigee]:
+    """Get perigee times
+
+    Parameters
+    ----------
+    perigee_times : np.ndarray
+        Array of perigee times
+    duration : int
+        Duration around perigee in minutes (default=100)
+
+    Returns
+    -------
+    event_perigees : list[EventPerigee]
+        List of perigee events
+    """
+    event_perigees = []
+    for perigee_time in perigee_times:
+        event_perigee = EventPerigee(
+            perigee_time - duration * u.min,
+            perigee_time,
+            perigee_time + duration * u.min,
+        )
+        event_perigees.append(event_perigee)
+    return event_perigees
 
 
 def get_kalman_drops_npnt(start, stop, duration=100) -> KalmanDropsData:
-    """Get the number of kalman drops per minute from NPNT telemetry.
+    """Get the fraction of IR flags set per minute from NPNT telemetry.
 
     Parameters
     ----------
@@ -586,24 +661,21 @@ def get_kalman_drops_npnt(start, stop, duration=100) -> KalmanDropsData:
     stop = CxoTime(stop)
     rad_zones = kadi.events.rad_zones.filter(start, stop).table
     perigee_times = CxoTime(rad_zones["perigee"])
-    msids = ["aokalstr", "aopcadmd", "aoacaseq"]
-    times_list = []
+    event_perigees = get_perigee_events(perigee_times, duration)
+    times_from_perigee_list = []
     n_drops_list = []
     colors_list = []
-    for idx, perigee_time in enumerate(perigee_times):
-        dat = fetch.MSIDset(
-            msids, perigee_time - duration * u.min, perigee_time + duration * u.min
-        )
-        if len(dat["aokalstr"]) > 200:
-            times, n_drops = get_binned_drops_from_npnt_tlm(dat)
-            times_list.append(times - perigee_time.secs)
+    for idx, ep in enumerate(event_perigees):
+        if len(ep.data["times"]) > 200:
+            times_from_perigee, n_drops = get_binned_drops_from_event_perigee(ep)
+            times_from_perigee_list.append(times_from_perigee)
             n_drops_list.append(n_drops)
-            colors_list.append([f"C{idx}"] * len(times))
+            colors_list.append([f"C{idx}"] * len(times_from_perigee))
 
     return KalmanDropsData(
         start,
         stop,
-        np.concatenate(times_list),
+        np.concatenate(times_from_perigee_list),
         np.concatenate(n_drops_list),
         np.concatenate(colors_list),
     )
@@ -616,7 +688,7 @@ def plot_kalman_drops(
     title: str | None = None,
     marker_size: float = 10,
 ) -> matplotlib.collections.PathCollection:
-    """Plot the number of kalman drops per minute.
+    """Plot the fraction of IR flags set per minute.
 
     Parameters
     ----------
@@ -647,7 +719,7 @@ def plot_kalman_drops(
     ax.xaxis.set_major_locator(plt.MultipleLocator(10))
     if title is None:
         title = (
-            f"Kalman drops per minute near perigee {kalman_drops_data.start.iso[:7]}"
+            f"IR flag fraction near perigee {kalman_drops_data.start.iso[:7]}"
         )
     if title:
         ax.set_title(title)
@@ -658,7 +730,7 @@ def plot_kalman_drops(
 def plot_mon_win_and_aokalstr_composite(
     kalman_drops_npnt, kalman_drops_nman_list, outfile=None, title=""
 ):
-    """Plot the monitor window and kalman drops data.
+    """Plot the monitor window (NMAN) and NPNT IR flags fraction data.
 
     Parameters
     ----------
@@ -689,6 +761,7 @@ def plot_mon_win_and_aokalstr_composite(
         )
 
     ax.set_title(title)
+    ax.set_ylim(-0.05, 1.0)
     fig.tight_layout()
 
     if outfile:
@@ -696,7 +769,7 @@ def plot_mon_win_and_aokalstr_composite(
 
 
 def cxotime_reldate(date):
-    """Parse a date string that can contain a relative time and return a CxoTime.
+    r"""Parse a date string that can contain a relative time and return a CxoTime.
 
     The relative time matches this regex: ``[-+]? [0-9]* \.? [0-9]+ d``. Examples
     include ``-45d`` and ``+1.5d`` (-45 days and +1.5 days from now, respectively).
@@ -711,7 +784,7 @@ def cxotime_reldate(date):
     out : CxoTime
         CxoTime object
     """
-    if re.match("[-+]? [0-9]* \.? [0-9]+ d", date, re.VERBOSE):
+    if re.match(r"[-+]? [0-9]* \.? [0-9]+ d", date, re.VERBOSE):
         dt = float(date[:-1])
         out = CxoTime.now() + dt * u.d
     else:
@@ -725,7 +798,7 @@ def main(args=None):
     stop = cxotime_reldate(opt.stop)
 
     # Intervals of NMAN within 40 minutes of perigee
-    manvrs_perigee = get_manvrs_perigee(start, stop)
+    manvrs_perigee = [] if opt.skip_mon else get_manvrs_perigee(start, stop)
 
     # Get list of monitor window data for each perigee maneuver
     mons = []
@@ -756,7 +829,7 @@ def main(args=None):
     kalman_drops_npnt = get_kalman_drops_npnt(start, stop)
 
     outfile = Path(opt.data_dir) / f"mon_win_kalman_drops_{opt.start}_{opt.stop}.png"
-    title = f"Perigee Kalman drops per minute {start.date[:8]} to {stop.date[:8]}"
+    title = f"IR flag fraction {start.date[:8]} to {stop.date[:8]}"
     plot_mon_win_and_aokalstr_composite(
         kalman_drops_npnt, kalman_drops_nman_list, outfile=outfile, title=title
     )
