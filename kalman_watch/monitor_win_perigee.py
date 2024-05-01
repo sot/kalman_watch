@@ -169,6 +169,7 @@ def get_manvrs_perigee(start: CxoTimeLike, stop: CxoTimeLike) -> Table:
         ok = (np.abs(manvrs["tstart"] - perigee_date.secs) < 40 * 60) | (
             np.abs(manvrs["tstop"] - perigee_date.secs) < 40 * 60
         )
+        manvrs["perigee"] = perigee_date
         manvrs_perigee.append(manvrs[ok])
 
     manvrs_perigee = vstack(manvrs_perigee)
