@@ -514,6 +514,19 @@ def get_kalman_drops_per_minute(mon: MonDataSet) -> tuple[np.ndarray, np.ndarray
     return np.array(dt_mins), np.array(kalman_drops)
 
 
+@functools.lru_cache()
+def get_stk_pred() -> Table:
+    """Get the predicted IR fraction from STK.
+
+    Returns
+    -------
+    stk_pred : Table
+        Table of predicted IR fraction from STK
+    """
+    stk_pred = Table.read("stk_pred_ir_frac.ecsv")
+    return stk_pred
+
+
 def get_kalman_drops_nman(mon: MonDataSet, idx: int):
     """Get kalman_drops data in the peculiar form for plot_kalman_drops.
 
@@ -535,6 +548,9 @@ def get_kalman_drops_nman(mon: MonDataSet, idx: int):
     kalman_drops_data = KalmanDropsData(
         mon["start"], mon["stop"], times, kalman_drops, colors
     )
+    stk_pred = get_stk_pred()
+    idxs = np.searchsorted(stk_pred["time"], times + mon["perigee_date"].secs)
+    kalman_drops_data.stk_ir_frac = stk_pred["ir_frac"][idxs]
     return kalman_drops_data
 
 
@@ -613,9 +629,7 @@ def get_binned_drops_from_event_perigee(
     return np.array(time_means), np.array(ir_flag_fracs)
 
 
-def get_perigee_events(
-    perigee_times: np.ndarray, duration=100
-) -> list[EventPerigee]:
+def get_perigee_events(perigee_times: np.ndarray, duration=100) -> list[EventPerigee]:
     """Get perigee times
 
     Parameters
@@ -715,12 +729,16 @@ def plot_kalman_drops(
         c=kalman_drops_data.colors,
         alpha=alpha,
     )
+    if hasattr(kalman_drops_data, "stk_ir_frac"):
+        ax.plot(
+            kalman_drops_data.times / 60,
+            kalman_drops_data.stk_ir_frac,
+            color=kalman_drops_data.colors[0],
+        )
     # set major ticks every 10 minutes
     ax.xaxis.set_major_locator(plt.MultipleLocator(10))
     if title is None:
-        title = (
-            f"IR flag fraction near perigee {kalman_drops_data.start.iso[:7]}"
-        )
+        title = f"IR flag fraction near perigee {kalman_drops_data.start.iso[:7]}"
     if title:
         ax.set_title(title)
     ax.set_xlabel("Time from perigee (minutes)")
@@ -820,9 +838,13 @@ def main(args=None):
     # This uses idx to assign a different color to each maneuver (in practice each
     # perigee).
     kalman_drops_nman_list: list[KalmanDropsData] = []
+    mon_times_list = []
+    mon_ir_fracs_list = []
     for idx, mon in enumerate(mons):
         kalman_drops_nman = get_kalman_drops_nman(mon, idx)
         kalman_drops_nman_list.append(kalman_drops_nman)
+        mon_times_list.append(kalman_drops_nman.times + mon["perigee_date"].secs)
+        mon_ir_fracs_list.append(kalman_drops_nman.kalman_drops)
 
     # Process NPNT data for the entire time range into kalman drops per minute. This
     # assigns different colors to each perigee.
@@ -833,6 +855,12 @@ def main(args=None):
     plot_mon_win_and_aokalstr_composite(
         kalman_drops_npnt, kalman_drops_nman_list, outfile=outfile, title=title
     )
+
+    mon_times = np.concatenate(mon_times_list)
+    mon_ir_fracs = np.concatenate(mon_ir_fracs_list)
+    outfile = Path(opt.data_dir) / f"mon_win_kalman_drops_{opt.start}_{opt.stop}.ecsv"
+    dat = Table([mon_times, mon_ir_fracs], names=["time", "ir_frac"])
+    dat.write(outfile, format="ascii.ecsv", overwrite=True)
 
     clean_aca_images_cache(opt.n_cache, opt.data_dir)
 
