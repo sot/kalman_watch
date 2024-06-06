@@ -111,7 +111,7 @@ def get_opt() -> argparse.ArgumentParser:
 
 
 def get_manvrs_perigee(start: CxoTimeLike, stop: CxoTimeLike) -> Table:
-    """Get maneuvers that start or stop within 40 minutes of perigee.
+    """Get maneuvers that start or stop within 100 minutes of perigee.
 
     This is used to select the monitor window data to compute the number of kalman drops
     per minute during perigee.
@@ -137,7 +137,7 @@ def get_manvrs_perigee(start: CxoTimeLike, stop: CxoTimeLike) -> Table:
     Returns
     -------
     manvrs_perigee : Table
-        Table of intervals of maneuvers that are entirely within 40 minutes of perigee.
+        Table of intervals of maneuvers that are within 100 minutes of perigee.
     """
     start = CxoTime(start)
     stop = CxoTime(stop)
@@ -163,11 +163,11 @@ def get_manvrs_perigee(start: CxoTimeLike, stop: CxoTimeLike) -> Table:
 
     manvrs = logical_intervals(pcad_mode.times, pcad_mode.vals == "NMAN")
 
-    # Get maneuvers that are entirely within 40 minutes of perigee
+    # Get maneuvers that intersect with the interval covering -/+ 100 minutes of perigee
     manvrs_perigee = []
     for perigee_date in CxoTime(perigee_dates):
-        ok = (np.abs(manvrs["tstart"] - perigee_date.secs) < 40 * 60) | (
-            np.abs(manvrs["tstop"] - perigee_date.secs) < 40 * 60
+        ok = (np.abs(manvrs["tstart"] - perigee_date.secs) < 100 * 60) | (
+            np.abs(manvrs["tstop"] - perigee_date.secs) < 100 * 60
         )
         manvrs_perigee.append(manvrs[ok])
 
@@ -529,7 +529,7 @@ def get_kalman_drops_nman(mon: MonDataSet, idx: int):
     kalman_drops_data : KalmanDropsData
     """
     dt_mins, kalman_drops = get_kalman_drops_per_minute(mon)
-    color = ["r", "m", "b", "g", "k"][idx % 5]
+    color = get_color_for_perigee(mon["perigee_date"].date)
     colors = [color] * len(dt_mins)
     times = np.array(dt_mins) * 60
     kalman_drops_data = KalmanDropsData(
@@ -613,9 +613,7 @@ def get_binned_drops_from_event_perigee(
     return np.array(time_means), np.array(ir_flag_fracs)
 
 
-def get_perigee_events(
-    perigee_times: np.ndarray, duration=100
-) -> list[EventPerigee]:
+def get_perigee_events(perigee_times: np.ndarray, duration=100) -> list[EventPerigee]:
     """Get perigee times
 
     Parameters
@@ -639,6 +637,29 @@ def get_perigee_events(
         )
         event_perigees.append(event_perigee)
     return event_perigees
+
+
+PERIGEE_COLORS = {}
+
+
+def get_color_for_perigee(perigee_date: str) -> str:
+    """Get a color for a perigee event.
+
+    Parameters
+    ----------
+    ep : EventPerigee
+        Perigee event object
+
+    Returns
+    -------
+    color : str
+        Color for perigee event
+    """
+    if perigee_date not in PERIGEE_COLORS:
+        idx = len(PERIGEE_COLORS) % 10
+        PERIGEE_COLORS[perigee_date] = f"C{idx}"
+        print(f"Perigee {perigee_date} color {PERIGEE_COLORS[perigee_date]}")
+    return PERIGEE_COLORS[perigee_date]
 
 
 def get_kalman_drops_npnt(start, stop, duration=100) -> KalmanDropsData:
@@ -665,12 +686,13 @@ def get_kalman_drops_npnt(start, stop, duration=100) -> KalmanDropsData:
     times_from_perigee_list = []
     n_drops_list = []
     colors_list = []
-    for idx, ep in enumerate(event_perigees):
+    for ep in event_perigees:
         if len(ep.data["times"]) > 200:
             times_from_perigee, n_drops = get_binned_drops_from_event_perigee(ep)
             times_from_perigee_list.append(times_from_perigee)
             n_drops_list.append(n_drops)
-            colors_list.append([f"C{idx}"] * len(times_from_perigee))
+            color = get_color_for_perigee(ep.perigee.date)
+            colors_list.append([color] * len(times_from_perigee))
 
     return KalmanDropsData(
         start,
@@ -687,6 +709,9 @@ def plot_kalman_drops(
     alpha: float = 1.0,
     title: str | None = None,
     marker_size: float = 10,
+    marker: str = "o",
+    edgecolors: str | None = None,
+    label: str | None = None,
 ) -> matplotlib.collections.PathCollection:
     """Plot the fraction of IR flags set per minute.
 
@@ -702,6 +727,8 @@ def plot_kalman_drops(
         Title for plot (default=None)
     marker_size : float
         Marker size for scatter plot (default=10)
+    marker : str
+        Marker symbol (default="o")
 
     Returns
     -------
@@ -714,13 +741,13 @@ def plot_kalman_drops(
         s=marker_size,
         c=kalman_drops_data.colors,
         alpha=alpha,
+        marker=marker,
+        edgecolors=edgecolors,
     )
     # set major ticks every 10 minutes
     ax.xaxis.set_major_locator(plt.MultipleLocator(10))
     if title is None:
-        title = (
-            f"IR flag fraction near perigee {kalman_drops_data.start.iso[:7]}"
-        )
+        title = f"IR flag fraction near perigee {kalman_drops_data.start.iso[:7]}"
     if title:
         ax.set_title(title)
     ax.set_xlabel("Time from perigee (minutes)")
@@ -752,12 +779,18 @@ def plot_mon_win_and_aokalstr_composite(
     plot_kalman_drops(
         kalman_drops_npnt,
         ax=ax,
-        alpha=0.4,
+        alpha=0.8,
+        marker_size=10,
     )
 
     for mon_win_kalman_drops in kalman_drops_nman_list:
         plot_kalman_drops(
-            mon_win_kalman_drops, ax=ax, alpha=1.0, marker_size=20, title=""
+            mon_win_kalman_drops,
+            ax=ax,
+            alpha=0.8,
+            marker_size=15,
+            title="",
+            edgecolors="k",
         )
 
     ax.set_title(title)
@@ -797,7 +830,7 @@ def main(args=None):
     start = cxotime_reldate(opt.start)
     stop = cxotime_reldate(opt.stop)
 
-    # Intervals of NMAN within 40 minutes of perigee
+    # Intervals of NMAN within 100 minutes of perigee
     manvrs_perigee = [] if opt.skip_mon else get_manvrs_perigee(start, stop)
 
     # Get list of monitor window data for each perigee maneuver
