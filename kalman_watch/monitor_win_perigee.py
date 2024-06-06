@@ -62,7 +62,7 @@ class KalmanDropsData:
     stop: CxoTime
     times: np.ndarray
     kalman_drops: np.ndarray
-    colors: list
+    perigee_date: str
 
 
 def get_opt() -> argparse.ArgumentParser:
@@ -101,9 +101,9 @@ def get_opt() -> argparse.ArgumentParser:
     parser.add_argument(
         "--n-cache",
         type=int,
-        default=30,
+        default=300,
         help=(
-            "Number of cached ACA images files (~0.7 Mb each) to keep (default=30)"
+            "Number of cached ACA images files (~0.7 Mb each) to keep (default=300)"
             " (set to 0 to disable caching)"
         ),
     )
@@ -514,7 +514,7 @@ def get_kalman_drops_per_minute(mon: MonDataSet) -> tuple[np.ndarray, np.ndarray
     return np.array(dt_mins), np.array(kalman_drops)
 
 
-def get_kalman_drops_nman(mon: MonDataSet, idx: int):
+def get_kalman_drops_nman(mon: MonDataSet) -> KalmanDropsData:
     """Get kalman_drops data in the peculiar form for plot_kalman_drops.
 
     Parameters
@@ -529,13 +529,15 @@ def get_kalman_drops_nman(mon: MonDataSet, idx: int):
     kalman_drops_data : KalmanDropsData
     """
     dt_mins, kalman_drops = get_kalman_drops_per_minute(mon)
-    color = get_color_for_perigee(mon["perigee_date"].date)
-    colors = [color] * len(dt_mins)
     times = np.array(dt_mins) * 60
-    kalman_drops_data = KalmanDropsData(
-        mon["start"], mon["stop"], times, kalman_drops, colors
+    kalman_drops = KalmanDropsData(
+        start=mon["start"],
+        stop=mon["stop"],
+        times=times,
+        kalman_drops=kalman_drops,
+        perigee_date=mon["perigee_date"].date,
     )
-    return kalman_drops_data
+    return kalman_drops
 
 
 def _reshape_to_n_sample_2d(arr: np.ndarray, n_sample: int = 60) -> np.ndarray:
@@ -662,7 +664,7 @@ def get_color_for_perigee(perigee_date: str) -> str:
     return PERIGEE_COLORS[perigee_date]
 
 
-def get_kalman_drops_npnt(start, stop, duration=100) -> KalmanDropsData:
+def get_kalman_drops_npnt(start, stop, duration=100) -> list[KalmanDropsData]:
     """Get the fraction of IR flags set per minute from NPNT telemetry.
 
     Parameters
@@ -676,48 +678,54 @@ def get_kalman_drops_npnt(start, stop, duration=100) -> KalmanDropsData:
 
     Returns
     -------
-    kalman_drops_data : KalmanDropsData
+    kalman_drops_data : list[KalmanDropsData]
     """
     start = CxoTime(start)
     stop = CxoTime(stop)
     rad_zones = kadi.events.rad_zones.filter(start, stop).table
     perigee_times = CxoTime(rad_zones["perigee"])
     event_perigees = get_perigee_events(perigee_times, duration)
-    times_from_perigee_list = []
-    n_drops_list = []
-    colors_list = []
+
+    kalman_drops_list = []
     for ep in event_perigees:
         if len(ep.data["times"]) > 200:
             times_from_perigee, n_drops = get_binned_drops_from_event_perigee(ep)
-            times_from_perigee_list.append(times_from_perigee)
-            n_drops_list.append(n_drops)
-            color = get_color_for_perigee(ep.perigee.date)
-            colors_list.append([color] * len(times_from_perigee))
+            kalman_drops = KalmanDropsData(
+                start=start,
+                stop=stop,
+                times=times_from_perigee,
+                kalman_drops=n_drops,
+                perigee_date=ep.perigee.date,
+            )
+            kalman_drops_list.append(kalman_drops)
 
-    return KalmanDropsData(
-        start,
-        stop,
-        np.concatenate(times_from_perigee_list),
-        np.concatenate(n_drops_list),
-        np.concatenate(colors_list),
-    )
+    return kalman_drops_list
+
+
+def short_date(date: str):
+    """Shorten a date string to just the day of year and time.
+
+    2024:056:12:34:56.789 -> 056 1234z
+    012345678901234567890
+    """
+    return f"{date[5:8]} {date[9:11]}{date[12:14]}z"
 
 
 def plot_kalman_drops(
-    kalman_drops_data: KalmanDropsData,
+    kalman_drops_list: list[KalmanDropsData],
     ax,
     alpha: float = 1.0,
     title: str | None = None,
     marker_size: float = 10,
     marker: str = "o",
     edgecolors: str | None = None,
-    label: str | None = None,
-) -> matplotlib.collections.PathCollection:
+    add_label: bool = False,
+) -> None:
     """Plot the fraction of IR flags set per minute.
 
     Parameters
     ----------
-    kalman_drops_data : KalmanDropsData
+    kalman_drops_list : list[KalmanDropsData]
         Output of get_kalman_drops_nman or get_kalman_drops_npnt
     ax : matplotlib.axes.Axes
         Matplotlib axes
@@ -729,39 +737,42 @@ def plot_kalman_drops(
         Marker size for scatter plot (default=10)
     marker : str
         Marker symbol (default="o")
+    edgecolors : str, None
+        Edge color for markers (default=None)
 
     Returns
     -------
     scat : matplotlib.collections.PathCollection
         Scatter plot collection
     """
-    scat = ax.scatter(
-        kalman_drops_data.times / 60,
-        kalman_drops_data.kalman_drops.clip(None, 160),
-        s=marker_size,
-        c=kalman_drops_data.colors,
-        alpha=alpha,
-        marker=marker,
-        edgecolors=edgecolors,
-    )
+    for kalman_drops in kalman_drops_list:
+        ax.scatter(
+            kalman_drops.times / 60,
+            kalman_drops.kalman_drops,
+            s=marker_size,
+            c=get_color_for_perigee(kalman_drops.perigee_date),
+            alpha=alpha,
+            marker=marker,
+            edgecolors=edgecolors,
+            label=short_date(kalman_drops.perigee_date) if add_label else None,
+        )
     # set major ticks every 10 minutes
     ax.xaxis.set_major_locator(plt.MultipleLocator(10))
     if title is None:
-        title = f"IR flag fraction near perigee {kalman_drops_data.start.iso[:7]}"
+        title = f"IR flag fraction near perigee {kalman_drops.start.iso[:7]}"
     if title:
         ax.set_title(title)
     ax.set_xlabel("Time from perigee (minutes)")
-    return scat
 
 
 def plot_mon_win_and_aokalstr_composite(
-    kalman_drops_npnt, kalman_drops_nman_list, outfile=None, title=""
+    kalman_drops_npnt_list, kalman_drops_nman_list, outfile=None, title=""
 ):
     """Plot the monitor window (NMAN) and NPNT IR flags fraction data.
 
     Parameters
     ----------
-    kalman_drops_npnt : KalmanDropsData
+    kalman_drops_npnt : list[KalmanDropsData]
         Output of get_kalman_drops_npnt
     kalman_drops_nman_list : list[KalmanDropsData]
         Output of get_kalman_drops_nman
@@ -777,24 +788,25 @@ def plot_mon_win_and_aokalstr_composite(
     fig, ax = plt.subplots(1, 1, figsize=(10, 3))
 
     plot_kalman_drops(
-        kalman_drops_npnt,
+        kalman_drops_npnt_list,
         ax=ax,
         alpha=0.8,
         marker_size=10,
+        add_label=True,
     )
 
-    for mon_win_kalman_drops in kalman_drops_nman_list:
-        plot_kalman_drops(
-            mon_win_kalman_drops,
-            ax=ax,
-            alpha=0.8,
-            marker_size=15,
-            title="",
-            edgecolors="k",
-        )
+    plot_kalman_drops(
+        kalman_drops_nman_list,
+        ax=ax,
+        alpha=0.8,
+        marker_size=15,
+        title="",
+        edgecolors="k",
+    )
 
     ax.set_title(title)
     ax.set_ylim(-0.05, 1.0)
+    ax.legend(fontsize="x-small", loc="upper left", ncol=4)
     fig.tight_layout()
 
     if outfile:
@@ -852,19 +864,16 @@ def main(args=None):
     # Process monitor window (NMAN) data into kalman drops per minute for each maneuver.
     # This uses idx to assign a different color to each maneuver (in practice each
     # perigee).
-    kalman_drops_nman_list: list[KalmanDropsData] = []
-    for idx, mon in enumerate(mons):
-        kalman_drops_nman = get_kalman_drops_nman(mon, idx)
-        kalman_drops_nman_list.append(kalman_drops_nman)
+    kalman_drops_nman_list = [get_kalman_drops_nman(mon) for mon in mons]
 
     # Process NPNT data for the entire time range into kalman drops per minute. This
     # assigns different colors to each perigee.
-    kalman_drops_npnt = get_kalman_drops_npnt(start, stop)
+    kalman_drops_npnt_list = get_kalman_drops_npnt(start, stop)
 
     outfile = Path(opt.data_dir) / f"mon_win_kalman_drops_{opt.start}_{opt.stop}.png"
     title = f"IR flag fraction {start.date[:8]} to {stop.date[:8]}"
     plot_mon_win_and_aokalstr_composite(
-        kalman_drops_npnt, kalman_drops_nman_list, outfile=outfile, title=title
+        kalman_drops_npnt_list, kalman_drops_nman_list, outfile=outfile, title=title
     )
 
     clean_aca_images_cache(opt.n_cache, opt.data_dir)
