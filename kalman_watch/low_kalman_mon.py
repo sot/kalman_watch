@@ -241,6 +241,9 @@ def make_web_page(opt, lowkals: Table) -> None:
         tr_classes.append(tr_class)
     long_durs["tr_class"] = tr_classes
 
+    with open(Path(opt.data_dir) / "kalman_plot.html") as f:
+        kalman_plot_html = f.read()
+
     index_template_html = INDEX_TEMPLATE_PATH().read_text()
     template = jinja2.Template(index_template_html)
     out_html = template.render(
@@ -248,6 +251,7 @@ def make_web_page(opt, lowkals: Table) -> None:
         long_dur_limit=opt.long_duration,
         last_date=lowkals.meta["date_telem_last"][:-4],
         plot_html=get_plot_html(opt, lowkals),
+        kalman_plot_html=kalman_plot_html,
     )
     lowkals_html_path = LOWKALS_HTML_PATH(opt.data_dir)
     logger.info(f"Writing HTML to {lowkals_html_path}")

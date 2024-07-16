@@ -26,6 +26,9 @@ from typing import TypeAlias
 
 os.environ["MPLBACKEND"] = "Agg"
 
+import plotly.express as px
+import plotly.graph_objects as go
+
 import astropy.units as u
 import kadi.events
 import matplotlib.collections
@@ -105,9 +108,9 @@ def get_opt() -> argparse.ArgumentParser:
     parser.add_argument(
         "--n-cache",
         type=int,
-        default=30,
+        default=70,
         help=(
-            "Number of cached ACA images files (~0.7 Mb each) to keep (default=30)"
+            "Number of cached ACA images files (~0.7 Mb each) to keep (default=70)"
             " (set to 0 to disable caching)"
         ),
     )
@@ -688,6 +691,45 @@ def get_color_marker_for_perigee(perigee_date: str) -> tuple[str, str]:
     return PERIGEE_COLOR_MARKERS[perigee_date]
 
 
+PERIGEE_COLOR_MARKERS_PLOTLY = {}
+
+
+def get_color_marker_for_perigee_plotly(perigee_date: str) -> tuple[str, str]:
+    """Get a color and marker (shape) for a perigee event date.
+
+    Parameters
+    ----------
+    perigee_date : str
+        Perigee event date
+
+    Returns
+    -------
+    color : str
+        Color for perigee event
+    marker : str
+        Marker for perigee event
+    """
+    if perigee_date not in PERIGEE_COLOR_MARKERS_PLOTLY:
+        n_perigees = len(PERIGEE_COLOR_MARKERS_PLOTLY)
+        colors = px.colors.qualitative.D3
+        markers = [
+            'circle',
+            'square',
+            'diamond',
+            'cross',
+            'x',
+            'triangle-up',
+            'triangle-down',
+            'triangle-left',
+            'triangle-right',
+            ]
+        color = colors[n_perigees % len(colors)]
+        marker = markers[n_perigees % len(markers)]
+        PERIGEE_COLOR_MARKERS_PLOTLY[perigee_date] = (color, marker)
+        logger.info(f"Perigee {perigee_date} {color=} {marker=}")
+    return PERIGEE_COLOR_MARKERS_PLOTLY[perigee_date]
+
+
 def get_kalman_drops_npnt(start, stop, duration=100) -> list[KalmanDropsData]:
     """Get the fraction of IR flags set per minute from NPNT telemetry.
 
@@ -797,17 +839,201 @@ def plot_kalman_drops(
     ax.set_xlabel("Time from perigee (minutes)")
 
 
-def plot_mon_win_and_aokalstr_composite(
-    kalman_drops_npnt_list, kalman_drops_nman_list, outfile=None, title=""
+def table_from_perigee(perigee):
+    perigee_time = CxoTime(perigee.perigee_date).cxcsec
+    table = Table()
+    table["rel_time"] = perigee.times
+    table["kalman_drops"] = perigee.kalman_drops
+    table["perigee"] = perigee.perigee_date
+    table["perigee_cxcsec"] = perigee_time
+    # why does the following give a different (and wrong) result?
+    # table["cxcsec"] = perigee_time + perigee.times
+    table["cxcsec"] = table["perigee_cxcsec"] + perigee.times
+    return table
+
+
+def plot_mon_win_and_aokalstr_composite_plotly(
+    kalman_drops_npnt_list, kalman_drops_nman_list, kalman_drops_prediction_list, outfile=None, title=""
 ):
     """Plot the monitor window (NMAN) and NPNT IR flags fraction data.
 
     Parameters
     ----------
-    kalman_drops_npnt : list[KalmanDropsData]
+    kalman_drops_npnt : KalmanDropsData
         Output of get_kalman_drops_npnt
     kalman_drops_nman_list : list[KalmanDropsData]
         Output of get_kalman_drops_nman
+    kalman_drops_prediction_list : list[KalmanDropsData]
+        Output of get_kalman_drops_prediction
+    outfile : str
+        Output file name (default=None)
+    title : str
+        Title for plot (default="")
+
+    Returns
+    -------
+    None
+    """
+    if outfile is None:
+        outfile = "kalman_plot.html"
+
+    fig = go.FigureWidget()
+
+    if not title:
+        title = f"IR flag fraction near perigee {kalman_drops_npnt_list.start.iso[:7]}"
+
+    nman_table = vstack([table_from_perigee(kalman_drops) for kalman_drops in kalman_drops_nman_list if len(kalman_drops.times) > 0])
+    nman_table["type"] = 0
+    npnt_table = vstack([table_from_perigee(kalman_drops) for kalman_drops in kalman_drops_npnt_list if len(kalman_drops.times) > 0])
+    npnt_table["type"] = 1
+    table = vstack([nman_table, npnt_table])
+    # type 0 first, because that determines the marker in the legend
+    table.sort(["type", "cxcsec"])
+
+    traces = {}
+
+    perigee_dates = np.unique(table["perigee"])
+
+    for perigee_date in perigee_dates:
+        color, marker = get_color_marker_for_perigee_plotly(perigee_date)
+        ok = table["perigee"] == perigee_date
+        markers = np.where(table["type"][ok] == 0, marker, f"{marker}-open")
+        marker_size = np.where(table["type"][ok] == 0, 5, 5)
+        line_width = np.where(table["type"][ok] == 0, 0, 1)
+        traces[perigee_date] = {
+            "times": table["rel_time"][ok] / 60,
+            "values": table["kalman_drops"][ok],
+            "colors": [color] * len(table["rel_time"][ok]),
+            "marker": markers,
+            "marker_size": marker_size,
+            "line_width": line_width,
+        }
+
+    plotly_traces = []
+    show_model_on_start = False
+
+    logger.info("plotting predictions")
+    for idx, pred_win_kalman_drops in enumerate(kalman_drops_prediction_list):
+        perigee_date = pred_win_kalman_drops.perigee_date
+        color, marker = get_color_marker_for_perigee_plotly(pred_win_kalman_drops.perigee_date)
+        if len(pred_win_kalman_drops.times) > 0:
+            plotly_traces.append(f"pred-{perigee_date}")
+            fig.add_trace(
+                go.Scattergl(
+                    x=pred_win_kalman_drops.times / 60,
+                    y=pred_win_kalman_drops.kalman_drops.clip(None, 160),
+                    line={"color": color},
+                    name=f"pred {perigee_date}",
+                    visible=show_model_on_start,
+                    legendgroup=f"{perigee_date}",
+                    showlegend=False,
+                )
+            )
+
+    for perigee_date, trace in traces.items():
+        plotly_traces.append(f"obs-{perigee_date}")
+        fig.add_trace(
+            go.Scattergl(
+                x=trace["times"],
+                y=trace["values"],
+                marker={
+                    "size": trace["marker_size"],
+                    "color": trace["colors"],
+                    "opacity": 0.7,
+                    "symbol": trace["marker"],
+                    "line_width": trace["line_width"],
+                },
+                mode="markers",
+                name=f"{perigee_date[5:8]} {perigee_date[9:11]}{perigee_date[12:14]}z",
+                legendgroup=perigee_date,
+                legendgrouptitle_text="",
+            )
+        )
+
+    fig.update_layout(
+        title=title,
+        template="seaborn",
+        xaxis_title="Time from perigee (minutes)",
+        autosize=False,
+        width=1000,
+        height=600,
+        xaxis = {
+            "tickmode": 'linear',
+            "tick0": -100,
+            "dtick": 10,
+        },
+        xaxis_range=[-110, 110],
+        yaxis_range=[-0.05, 1.05],
+        margin={"b": 200},
+    )
+
+    fig.update_layout(
+        legend= {
+            "x": 0.,
+            "y": -0.2,
+            "yanchor": "top",
+            "orientation": "h",
+            "font": {"size": 9},
+        },
+    )
+
+    predicted_traces = [idx for idx, trace in enumerate(plotly_traces) if trace.startswith("pred-")]
+
+    fig.update_layout(
+        updatemenus=[
+            dict(
+                type = "buttons",
+                direction = "left",
+                active=0 if show_model_on_start else 1,
+                buttons=list([
+                    dict(
+                        args2=[
+                            {"visible": [False] * len(predicted_traces)},
+                            {},
+                            predicted_traces,
+                        ],
+                        args=[
+                            {"visible": [True] * len(predicted_traces)},
+                            {},
+                            predicted_traces,
+                        ],
+                        label="Show Rad Model",
+                        method="update"
+                    )
+                ]),
+                pad={"r": 0, "t": 0},
+                showactive=True,
+                x=0.02,
+                xanchor="left",
+                y=0.96,
+                yanchor="top"
+            ),
+        ]
+    )
+
+    if outfile:
+        kalman_plot_html = fig.to_html(
+            full_html=False,
+            include_plotlyjs="cdn",
+            default_width=1000,
+            default_height=600,
+            config={"displayModeBar": True},
+        )
+        with open(outfile, "w") as fh:
+            fh.write(kalman_plot_html)
+
+
+def plot_mon_win_and_aokalstr_composite(
+    kalman_drops_npnt_list, kalman_drops_nman_list, kalman_drops_prediction_list, outfile=None, title=""
+):
+    """Plot the monitor window (NMAN) and NPNT IR flags fraction data.
+
+    Parameters
+    ----------
+    kalman_drops_nman_list : list[KalmanDropsData]
+        Output of get_kalman_drops_nman
+    kalman_drops_prediction_list : list[KalmanDropsData]
+        Output of get_kalman_drops_prediction
     outfile : str
         Output file name (default=None)
     title : str
@@ -836,6 +1062,17 @@ def plot_mon_win_and_aokalstr_composite(
         edgecolors="k",
         add_label=True,
     )
+
+    logger.info("plotting predictions")
+    for pred_win_kalman_drops in kalman_drops_prediction_list:
+        if len(pred_win_kalman_drops.times) > 0:
+            color, _ = get_color_marker_for_perigee(pred_win_kalman_drops.perigee_date)
+            _ = ax.plot(
+                pred_win_kalman_drops.times / 60,
+                pred_win_kalman_drops.kalman_drops.clip(None, 160),
+                c=color,
+                alpha=1,
+            )
 
     ax.set_title(title)
     ax.set_ylim(-0.05, 1.0)
@@ -870,6 +1107,56 @@ def cxotime_reldate(date):
     return out
 
 
+@functools.lru_cache()
+def get_rad_table():
+    rad_table = Table.read(Path(os.environ["SKA"]) / "data" / "stk_radiation" / "rad_data_2022:003:12:00:00.000-2025:365:11:59:59.000.fits")
+    rad_table["time"] = CxoTime(rad_table["time"])
+    return rad_table
+
+
+def get_kalman_drops_prediction(start, stop, duration=100) -> list[KalmanDropsData]:
+    """Get the expected fraction of IR flags set per minute from from STK radiation model.
+
+    Parameters
+    ----------
+    start : CxoTimeLike
+        Start time
+    stop : CxoTimeLike
+        Stop time
+    duration : int
+        Duration around perigee in minutes (default=100)
+
+    Returns
+    -------
+    kalman_drops_data : list[KalmanDropsData]
+    """
+    # result of a linear fit of kalman_drops vs proton_26_300_MeV
+    b, a = 1.72306678e-09, 0.011492516864638577
+
+    start = CxoTime(start)
+    stop = CxoTime(stop)
+    rad_zones = kadi.events.rad_zones.filter(start, stop).table
+    perigee_times = CxoTime(rad_zones["perigee"])
+
+    rad_table = get_rad_table()
+
+    result = []
+    for perigee_time in perigee_times:
+        perigee_start = perigee_time - duration * u.min
+        perigee_stop = perigee_time + duration * u.min
+        sel = (rad_table["time"] >= perigee_start) & (rad_table["time"] <= perigee_stop)
+        times = (rad_table["time"][sel] - perigee_time).sec
+        values = a + rad_table["proton_26_300_MeV"][sel] * b
+        result.append(KalmanDropsData(
+            start=perigee_start,
+            stop=perigee_stop,
+            times=times,
+            kalman_drops=values,
+            perigee_date=perigee_time.date,
+        ))
+    return result
+
+
 def main(args=None):
     opt = get_opt().parse_args(args)
     start = cxotime_reldate(opt.start)
@@ -897,16 +1184,24 @@ def main(args=None):
     # Process monitor window (NMAN) data into kalman drops per minute for each maneuver.
     # This uses idx to assign a different color to each maneuver (in practice each
     # perigee).
+    logger.info("processing NMAN data")
     kalman_drops_nman_list = [get_kalman_drops_nman(mon) for mon in mons]
 
     # Process NPNT data for the entire time range into kalman drops per minute. This
     # assigns different colors to each perigee.
     kalman_drops_npnt_list = get_kalman_drops_npnt(start, stop)
 
-    outfile = Path(opt.data_dir) / f"mon_win_kalman_drops_{opt.start}_{opt.stop}.png"
+    kalman_drops_prediction_list = get_kalman_drops_prediction(start, stop)
+
+    outfile = Path(opt.data_dir) / "kalman_plot.html"
     title = f"IR flag fraction {start.date[:8]} to {stop.date[:8]}"
-    plot_mon_win_and_aokalstr_composite(
-        kalman_drops_npnt_list, kalman_drops_nman_list, outfile=outfile, title=title
+
+    plot_mon_win_and_aokalstr_composite_plotly(
+        kalman_drops_npnt_list,
+        kalman_drops_nman_list,
+        kalman_drops_prediction_list,
+        outfile=outfile,
+        title=title
     )
 
     clean_aca_images_cache(opt.n_cache, opt.data_dir)
