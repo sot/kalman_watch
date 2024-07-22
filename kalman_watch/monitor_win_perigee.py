@@ -402,10 +402,26 @@ def get_hits(
         }
         hits.append(hit)
 
-    hits = Table(hits)
-    hits["hit_idx"] = np.arange(len(hits))
+    if hits:
+        out = Table(hits)
+        out["hit_idx"] = np.arange(len(hits))
+    else:
+        out = Table(
+            names=[
+                "time",
+                "dt_min",
+                "slot",
+                "ir_flag",
+                "img_idx",
+                "sum",
+                "max",
+                "pixels",
+                "hit_idx",
+            ],
+            dtype=[float, float, int, bool, int, float, float, float, int],
+        )
 
-    return hits
+    return out
 
 
 def get_mon_dataset(
