@@ -704,6 +704,9 @@ def get_kalman_drops_npnt(start, stop, duration=100) -> list[KalmanDropsData]:
 
     kalman_drops_list = []
     for ep in event_perigees:
+        if ep.tlm is None:
+            logger.warning(f"No telemetry for perigee {ep.perigee.date}")
+            continue
         if len(ep.data["times"]) > 200:
             times_from_perigee, n_drops = get_binned_drops_from_event_perigee(ep)
             kalman_drops = KalmanDropsData(
