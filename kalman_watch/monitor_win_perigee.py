@@ -641,27 +641,31 @@ def get_perigee_events(perigee_times: np.ndarray, duration=100) -> list[EventPer
     return event_perigees
 
 
-PERIGEE_COLORS = {}
+PERIGEE_COLOR_MARKERS = {}
 
 
-def get_color_for_perigee(perigee_date: str) -> str:
-    """Get a color for a perigee event.
+def get_color_marker_for_perigee(perigee_date: str) -> tuple[str, str]:
+    """Get a color and marker (shape) for a perigee event date.
 
     Parameters
     ----------
-    ep : EventPerigee
-        Perigee event object
+    perigee_date : str
+        Perigee event date
 
     Returns
     -------
     color : str
         Color for perigee event
+    marker : str
+        Marker for perigee event
     """
-    if perigee_date not in PERIGEE_COLORS:
-        idx = len(PERIGEE_COLORS) % 10
-        PERIGEE_COLORS[perigee_date] = f"C{idx}"
-        print(f"Perigee {perigee_date} color {PERIGEE_COLORS[perigee_date]}")
-    return PERIGEE_COLORS[perigee_date]
+    if perigee_date not in PERIGEE_COLOR_MARKERS:
+        n_perigees = len(PERIGEE_COLOR_MARKERS)
+        color = f"C{n_perigees % 10}"
+        marker = "osDv^"[(n_perigees // 5) % 5]
+        PERIGEE_COLOR_MARKERS[perigee_date] = (color, marker)
+        logger.info(f"Perigee {perigee_date} {color=} {marker=}")
+    return PERIGEE_COLOR_MARKERS[perigee_date]
 
 
 def get_kalman_drops_npnt(start, stop, duration=100) -> list[KalmanDropsData]:
@@ -717,7 +721,6 @@ def plot_kalman_drops(
     alpha: float = 1.0,
     title: str | None = None,
     marker_size: float = 10,
-    marker: str = "o",
     edgecolors: str | None = None,
     add_label: bool = False,
 ) -> None:
@@ -735,8 +738,6 @@ def plot_kalman_drops(
         Title for plot (default=None)
     marker_size : float
         Marker size for scatter plot (default=10)
-    marker : str
-        Marker symbol (default="o")
     edgecolors : str, None
         Edge color for markers (default=None)
 
@@ -746,11 +747,12 @@ def plot_kalman_drops(
         Scatter plot collection
     """
     for kalman_drops in kalman_drops_list:
+        color, marker = get_color_marker_for_perigee(kalman_drops.perigee_date)
         ax.scatter(
             kalman_drops.times / 60,
             kalman_drops.kalman_drops,
             s=marker_size,
-            c=get_color_for_perigee(kalman_drops.perigee_date),
+            c=color,
             alpha=alpha,
             marker=marker,
             edgecolors=edgecolors,
