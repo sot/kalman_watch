@@ -56,6 +56,10 @@ ACAImagesTable: TypeAlias = Table
 MonDataSet: TypeAlias = dict[str]  # TODO: use dataclass
 
 
+# Keep track of labels used in the plot so that we don't repeat them
+LABELS_USED = {}  # date: label
+
+
 @dataclass
 class KalmanDropsData:
     start: CxoTime
@@ -766,7 +770,13 @@ def plot_kalman_drops(
         Scatter plot collection
     """
     for kalman_drops in kalman_drops_list:
-        color, marker = get_color_marker_for_perigee(kalman_drops.perigee_date)
+        date = kalman_drops.perigee_date
+        color, marker = get_color_marker_for_perigee(date)
+        if add_label and date not in LABELS_USED:
+            label = LABELS_USED[date] = short_date(date)
+        else:
+            label = None
+
         ax.scatter(
             kalman_drops.times / 60,
             kalman_drops.kalman_drops,
@@ -775,8 +785,9 @@ def plot_kalman_drops(
             alpha=alpha,
             marker=marker,
             edgecolors=edgecolors,
-            label=short_date(kalman_drops.perigee_date) if add_label else None,
+            label=label,
         )
+        
     # set major ticks every 10 minutes
     ax.xaxis.set_major_locator(plt.MultipleLocator(10))
     if title is None:
@@ -813,7 +824,7 @@ def plot_mon_win_and_aokalstr_composite(
         ax=ax,
         alpha=0.8,
         marker_size=10,
-        add_label=True,
+        add_label=False,
     )
 
     plot_kalman_drops(
@@ -823,6 +834,7 @@ def plot_mon_win_and_aokalstr_composite(
         marker_size=15,
         title="",
         edgecolors="k",
+        add_label=True,
     )
 
     ax.set_title(title)
