@@ -101,9 +101,9 @@ def get_opt() -> argparse.ArgumentParser:
     parser.add_argument(
         "--n-cache",
         type=int,
-        default=300,
+        default=30,
         help=(
-            "Number of cached ACA images files (~0.7 Mb each) to keep (default=300)"
+            "Number of cached ACA images files (~0.7 Mb each) to keep (default=30)"
             " (set to 0 to disable caching)"
         ),
     )
