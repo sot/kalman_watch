@@ -678,7 +678,7 @@ def get_color_marker_for_perigee(perigee_date: str) -> tuple[str, str]:
     if perigee_date not in PERIGEE_COLOR_MARKERS:
         n_perigees = len(PERIGEE_COLOR_MARKERS)
         color = f"C{n_perigees % 10}"
-        marker = "osDv^"[(n_perigees // 5) % 5]
+        marker = "o^sDv"[(n_perigees // 10) % 5]
         PERIGEE_COLOR_MARKERS[perigee_date] = (color, marker)
         logger.info(f"Perigee {perigee_date} {color=} {marker=}")
     return PERIGEE_COLOR_MARKERS[perigee_date]
