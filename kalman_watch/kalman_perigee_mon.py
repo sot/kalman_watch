@@ -3,7 +3,9 @@
 
 import argparse
 import calendar
+import functools
 import json
+import os
 import re
 from itertools import cycle
 from pathlib import Path
@@ -393,6 +395,13 @@ def send_process_mail(opt, evts_perigee):
     send_mail(LOGGER, opt, subject, text, __file__)
 
 
+@functools.lru_cache()
+def get_rad_table():
+    rad_table = Table.read(Path(os.environ["SKA"]) / "data" / "stk_radiation" / "rad_data_2022:003:12:00:00.000-2025:365:11:59:59.000.fits")
+    rad_table["time"] = CxoTime(rad_table["time"])
+    return rad_table
+
+
 class EventPerigee:
     """Class for tracking Kalman star data through perigee."""
 
@@ -564,6 +573,23 @@ class EventPerigee:
             info[f"n{nle}_ints"] = np.count_nonzero((low_kals["n_kalstr"] == nle))
             info[f"n{nle}_cnt"] = low_kals.meta[f"n{nle}_cnt"]
         return info
+
+    @property
+    def predicted_kalman_drops(self):
+        if not hasattr(self, "_info"):
+            self._predicted_kalman_drops = self._get_predicted_kalman_drops()
+        return self._predicted_kalman_drops
+
+    def _get_predicted_kalman_drops(self):
+        # result of a linear fit of kalman_drops vs proton_26_300_MeV
+        b, a = 1.72306678e-09, 0.011492516864638577
+        rad_table = get_rad_table()
+        sel = (rad_table["time"] >= self.rad_entry) & (rad_table["time"] <= self.rad_exit)
+        predicted_kalman_drops = {
+            "times": (rad_table["time"][sel] - self.perigee).sec,
+            "values": a + rad_table["proton_26_300_MeV"][sel] * b,
+        }
+        return predicted_kalman_drops
 
     def write_info(self, opt):
         """Write info to file"""

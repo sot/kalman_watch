@@ -915,7 +915,7 @@ def plot_mon_win_and_aokalstr_composite_plotly(
     logger.info("plotting predictions")
     for idx, pred_win_kalman_drops in enumerate(kalman_drops_prediction_list):
         perigee_date = pred_win_kalman_drops.perigee_date
-        color, marker = get_color_marker_for_perigee_plotly(pred_win_kalman_drops.perigee_date)
+        color, marker = get_color_marker_for_perigee_plotly(pred_win_kalman_drops.perigee_date.date)
         if len(pred_win_kalman_drops.times) > 0:
             plotly_traces.append(f"pred-{perigee_date}")
             fig.add_trace(
@@ -1107,13 +1107,6 @@ def cxotime_reldate(date):
     return out
 
 
-@functools.lru_cache()
-def get_rad_table():
-    rad_table = Table.read(Path(os.environ["SKA"]) / "data" / "stk_radiation" / "rad_data_2022:003:12:00:00.000-2025:365:11:59:59.000.fits")
-    rad_table["time"] = CxoTime(rad_table["time"])
-    return rad_table
-
-
 def get_kalman_drops_prediction(start, stop, duration=100) -> list[KalmanDropsData]:
     """Get the expected fraction of IR flags set per minute from from STK radiation model.
 
@@ -1130,30 +1123,22 @@ def get_kalman_drops_prediction(start, stop, duration=100) -> list[KalmanDropsDa
     -------
     kalman_drops_data : list[KalmanDropsData]
     """
-    # result of a linear fit of kalman_drops vs proton_26_300_MeV
-    b, a = 1.72306678e-09, 0.011492516864638577
-
     start = CxoTime(start)
     stop = CxoTime(stop)
     rad_zones = kadi.events.rad_zones.filter(start, stop).table
     perigee_times = CxoTime(rad_zones["perigee"])
+    event_perigees = get_perigee_events(perigee_times, duration)
 
-    rad_table = get_rad_table()
-
-    result = []
-    for perigee_time in perigee_times:
-        perigee_start = perigee_time - duration * u.min
-        perigee_stop = perigee_time + duration * u.min
-        sel = (rad_table["time"] >= perigee_start) & (rad_table["time"] <= perigee_stop)
-        times = (rad_table["time"][sel] - perigee_time).sec
-        values = a + rad_table["proton_26_300_MeV"][sel] * b
-        result.append(KalmanDropsData(
-            start=perigee_start,
-            stop=perigee_stop,
-            times=times,
-            kalman_drops=values,
-            perigee_date=perigee_time.date,
-        ))
+    result = [
+        KalmanDropsData(
+            start=perigee.rad_entry,
+            stop=perigee.rad_exit,
+            times=perigee.predicted_kalman_drops["times"],
+            kalman_drops=perigee.predicted_kalman_drops["values"],
+            perigee_date=perigee.perigee,
+        )
+        for perigee in event_perigees
+    ]
     return result
 
 
