@@ -18,22 +18,17 @@ a synonym for the IR flag fraction.
 
 import argparse
 import functools
-import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TypeAlias
 
-os.environ["MPLBACKEND"] = "Agg"
 
 import plotly.express as px
 import plotly.graph_objects as go
 
 import astropy.units as u
 import kadi.events
-import matplotlib.collections
-import matplotlib.pyplot as plt
-import matplotlib.style
 import numpy as np
 import scipy.signal
 from astropy.table import Table, vstack
@@ -49,7 +44,6 @@ from ska_helpers.logging import basic_logger
 from kalman_watch import __version__
 from kalman_watch.kalman_perigee_mon import EventPerigee
 
-matplotlib.style.use("bmh")
 
 logger = basic_logger(__name__, level="INFO")
 
@@ -563,13 +557,6 @@ def get_kalman_drops_nman(mon: MonDataSet) -> KalmanDropsData:
     return kalman_drops
 
 
-def _reshape_to_n_sample_2d(arr: np.ndarray, n_sample: int = 60) -> np.ndarray:
-    """Reshape 1D array to 2D with one row per n_sample samples."""
-    arr = arr[: -(arr.size % n_sample)]
-    arr = arr.reshape(-1, n_sample)
-    return arr
-
-
 def get_binned_drops_from_event_perigee(
     ep: EventPerigee,
 ) -> tuple[np.ndarray, np.ndarray]:
@@ -664,33 +651,6 @@ def get_perigee_events(perigee_times: np.ndarray, duration=100) -> list[EventPer
     return event_perigees
 
 
-PERIGEE_COLOR_MARKERS = {}
-
-
-def get_color_marker_for_perigee(perigee_date: str) -> tuple[str, str]:
-    """Get a color and marker (shape) for a perigee event date.
-
-    Parameters
-    ----------
-    perigee_date : str
-        Perigee event date
-
-    Returns
-    -------
-    color : str
-        Color for perigee event
-    marker : str
-        Marker for perigee event
-    """
-    if perigee_date not in PERIGEE_COLOR_MARKERS:
-        n_perigees = len(PERIGEE_COLOR_MARKERS)
-        color = f"C{n_perigees % 10}"
-        marker = "o^sDv"[(n_perigees // 10) % 5]
-        PERIGEE_COLOR_MARKERS[perigee_date] = (color, marker)
-        logger.info(f"Perigee {perigee_date} {color=} {marker=}")
-    return PERIGEE_COLOR_MARKERS[perigee_date]
-
-
 PERIGEE_COLOR_MARKERS_PLOTLY = {}
 
 
@@ -778,65 +738,6 @@ def short_date(date: str):
     012345678901234567890
     """
     return f"{date[5:8]} {date[9:11]}{date[12:14]}z"
-
-
-def plot_kalman_drops(
-    kalman_drops_list: list[KalmanDropsData],
-    ax,
-    alpha: float = 1.0,
-    title: str | None = None,
-    marker_size: float = 10,
-    edgecolors: str | None = None,
-    add_label: bool = False,
-) -> None:
-    """Plot the fraction of IR flags set per minute.
-
-    Parameters
-    ----------
-    kalman_drops_list : list[KalmanDropsData]
-        Output of get_kalman_drops_nman or get_kalman_drops_npnt
-    ax : matplotlib.axes.Axes
-        Matplotlib axes
-    alpha : float
-        Alpha value for scatter plot
-    title : str, None
-        Title for plot (default=None)
-    marker_size : float
-        Marker size for scatter plot (default=10)
-    edgecolors : str, None
-        Edge color for markers (default=None)
-
-    Returns
-    -------
-    scat : matplotlib.collections.PathCollection
-        Scatter plot collection
-    """
-    for kalman_drops in kalman_drops_list:
-        date = kalman_drops.perigee_date
-        color, marker = get_color_marker_for_perigee(date)
-        if add_label and date not in LABELS_USED:
-            label = LABELS_USED[date] = short_date(date)
-        else:
-            label = None
-
-        ax.scatter(
-            kalman_drops.times / 60,
-            kalman_drops.kalman_drops,
-            s=marker_size,
-            c=color,
-            alpha=alpha,
-            marker=marker,
-            edgecolors=edgecolors,
-            label=label,
-        )
-        
-    # set major ticks every 10 minutes
-    ax.xaxis.set_major_locator(plt.MultipleLocator(10))
-    if title is None:
-        title = f"IR flag fraction near perigee {kalman_drops.start.iso[:7]}"
-    if title:
-        ax.set_title(title)
-    ax.set_xlabel("Time from perigee (minutes)")
 
 
 def table_from_perigee(perigee):
@@ -1021,66 +922,6 @@ def plot_mon_win_and_aokalstr_composite_plotly(
         )
         with open(outfile, "w") as fh:
             fh.write(kalman_plot_html)
-
-
-def plot_mon_win_and_aokalstr_composite(
-    kalman_drops_npnt_list, kalman_drops_nman_list, kalman_drops_prediction_list, outfile=None, title=""
-):
-    """Plot the monitor window (NMAN) and NPNT IR flags fraction data.
-
-    Parameters
-    ----------
-    kalman_drops_nman_list : list[KalmanDropsData]
-        Output of get_kalman_drops_nman
-    kalman_drops_prediction_list : list[KalmanDropsData]
-        Output of get_kalman_drops_prediction
-    outfile : str
-        Output file name (default=None)
-    title : str
-        Title for plot (default="")
-
-    Returns
-    -------
-    None
-    """
-    fig, ax = plt.subplots(1, 1, figsize=(10, 3))
-
-    plot_kalman_drops(
-        kalman_drops_npnt_list,
-        ax=ax,
-        alpha=0.8,
-        marker_size=10,
-        add_label=False,
-    )
-
-    plot_kalman_drops(
-        kalman_drops_nman_list,
-        ax=ax,
-        alpha=0.8,
-        marker_size=15,
-        title="",
-        edgecolors="k",
-        add_label=True,
-    )
-
-    logger.info("plotting predictions")
-    for pred_win_kalman_drops in kalman_drops_prediction_list:
-        if len(pred_win_kalman_drops.times) > 0:
-            color, _ = get_color_marker_for_perigee(pred_win_kalman_drops.perigee_date)
-            _ = ax.plot(
-                pred_win_kalman_drops.times / 60,
-                pred_win_kalman_drops.kalman_drops.clip(None, 160),
-                c=color,
-                alpha=1,
-            )
-
-    ax.set_title(title)
-    ax.set_ylim(-0.05, 1.0)
-    ax.legend(fontsize="x-small", loc="upper left", ncol=4)
-    fig.tight_layout()
-
-    if outfile:
-        fig.savefig(outfile, dpi=200)
 
 
 def cxotime_reldate(date):
