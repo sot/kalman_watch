@@ -34,6 +34,7 @@ from ska_helpers.logging import basic_logger
 
 from kalman_watch import __version__
 from kalman_watch.kalman_watch_data import (
+    OPTIONS,
     NotEnoughImagesError,
     get_manvrs_perigee,
     get_mon_dataset,
@@ -345,6 +346,10 @@ def main(args=None):
     opt = get_opt().parse_args(args)
     start = cxotime_reldate(opt.start)
     stop = cxotime_reldate(opt.stop)
+
+    OPTIONS.update({
+        "data_dir": opt.data_dir,
+    })
 
     # Intervals of NMAN within 100 minutes of perigee
     manvrs_perigee = [] if opt.skip_mon else get_manvrs_perigee(start, stop)

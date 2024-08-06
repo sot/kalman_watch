@@ -2,6 +2,7 @@
 """Watch Kalman star data during perigee passages."""
 
 import calendar
+import collections
 import functools
 import json
 import os
@@ -43,24 +44,84 @@ FILE_DIR = Path(__file__).parent
 ATT_ERR_SUBSAMP = 8
 
 
-def PERIGEES_DIR_PATH(data_dir: str) -> Path:
-    return Path(data_dir) / "perigees"
 
+class Options(collections.abc.MutableMapping):
+    """
+    Context manager and singleton configuration object.
 
-def PERIGEES_INDEX_TABLE_PATH(data_dir: str) -> Path:
-    return PERIGEES_DIR_PATH(data_dir) / "kalman_perigees.ecsv"
+    opt = Options(a=1, b=2)
+    print(opt)  # {'a': 1, 'b': 2}
+    opt2 = Options(a=2, c=3)
+    print(opt)  # {'a': 1, 'b': 2}
+    print(opt2)  # {'a': 1, 'b': 2}
+    opt == opt2  # True
+    with opt2:
+        print(opt)  # {'a': 2, 'b': 2, 'c': 3}
+    print(opt)  # {'a': 1, 'b': 2}
+    with opt(a=3):
+        print(opt)  # {'a': 3, 'b': 2}
+    """
 
+    _options = None
 
-def EVT_PERIGEE_DATA_PATH(data_dir: str, evt: "EventPerigee") -> Path:
-    return EVT_PERIGEE_DIR_PATH(data_dir, evt) / "data.npz"
+    def __init__(self, **options):
+        if self.__class__._options is None:
+            self.__class__._options = options
+        self._new_options = options
 
+    def __enter__(self):
+        self._orig_options = self.__class__._options
+        new_options = self._orig_options.copy()
+        new_options.update(self._new_options)
+        self.__class__._options = new_options
 
-def EVT_PERIGEE_INFO_PATH(data_dir: str, evt: "EventPerigee") -> Path:
-    return EVT_PERIGEE_DIR_PATH(data_dir, evt) / "info.json"
+    def __exit__(self, type, value, traceback):
+        self.__class__._options = self._orig_options
 
+    def __call__(self, **kwargs):
+        return self.__class__(**kwargs)
 
-def EVT_PERIGEE_DIR_PATH(data_dir: str, evt: "EventPerigee"):
-    return PERIGEES_DIR_PATH(data_dir) / evt.dirname
+    def update(self, options):
+        self._options.update(options)
+
+    def __delitem__(self, key):
+        self._options.__delitem__(key)
+    def __getitem__(self, key):
+        return self._options.__getitem__(key)
+    def __iter__(self):
+        return self._options.__iter__()
+    def __len__(self):
+        return len(self._options)
+    def __setitem__(self, key, val):
+        self._options[key] = val
+    
+    def __repr__(self):
+        return self._options.__repr__()
+    def __str__(self):
+        return self._options.__str__()
+
+    def perigees_dir_path(self) -> Path:
+        return Path(self["data_dir"]) / self["perigee_dir_basename"]
+
+    def perigees_index_table_path(self) -> Path:
+        return self.perigees_dir_path() / self["perigee_index_basename"]
+
+    def evt_perigee_dir_path(self, evt: "EventPerigee"):
+        return self.perigees_dir_path() / evt.dirname
+
+    def evt_perigee_data_path(self, evt: "EventPerigee") -> Path:
+        return self.evt_perigee_dir_path(evt) / self["perigee_event_basename"]
+
+    def evt_perigee_info_path(self, evt: "EventPerigee") -> Path:
+        return self.evt_perigee_dir_path(evt) / self["perigee_info_basename"]
+
+OPTIONS = Options(
+    data_dir=".",
+    perigee_event_basename="data.npz",
+    perigee_info_basename="info.json",
+    perigee_index_basename="kalman_perigees.ecsv",
+    perigee_dir_basename="perigees",
+)
 
 
 # Default Kalman low intervals thresholds (n_kalstr, dur_limit) for
@@ -82,21 +143,21 @@ def get_dirname(date: Union[CxoTime, None]) -> str:
     return out
 
 
-def read_kalman_stats(opt, from_info=False) -> Table:
+def read_kalman_stats(from_info=False) -> Table:
     """Read kalman stats from file or from event info.json files.
 
     If ``from_info`` is True, read all individual event info files instead of
     the data file. This is also tried if the kalman stats file does not exist,
     which allows re-generating the kalman stats file.
     """
-    path = PERIGEES_INDEX_TABLE_PATH(opt.data_dir)
+    path = OPTIONS.perigees_index_table_path()
     if path.exists() and not from_info:
         LOGGER.info(f"Reading kalman perigee data from {path}")
         kalman_stats = Table.read(path)
     else:
         rows = []
         # Look for files like 2019/Jan-12/info.json
-        for info_file in PERIGEES_DIR_PATH(opt.data_dir).glob("????/??????/info.json"):
+        for info_file in OPTIONS.perigees_dir_path().glob("????/??????/info.json"):
             if re.search(r"\d{4}/\w{3}-\d{2}/info\.json", info_file.as_posix()):
                 LOGGER.info(f"Reading kalman perigee data from {info_file}")
                 info = json.loads(info_file.read_text())
@@ -388,13 +449,13 @@ class EventPerigee:
         }
         return predicted_kalman_drops
 
-    def write_info(self, opt):
+    def write_info(self):
         """Write info to file"""
-        path = EVT_PERIGEE_INFO_PATH(opt.data_dir, self)
+        path = OPTIONS.evt_perigee_info_path(self)
         LOGGER.info(f"Writing info to {path}")
         path.write_text(json.dumps(self.info, indent=4))
 
-    def write_data(self, opt):
+    def write_data(self):
         # Compressed version of data
         dc = {}
 
@@ -422,7 +483,7 @@ class EventPerigee:
             dc["aca_track"] |= self.data[f"aca_track{slot}"].astype(np.uint8) << slot
             dc["aca_ir"] |= self.data[f"aca_ir{slot}"].astype(np.uint8) << slot
 
-        path = EVT_PERIGEE_DATA_PATH(opt.data_dir, self)
+        path = OPTIONS.evt_perigee_data_path(self)
         path.parent.mkdir(parents=True, exist_ok=True)
         LOGGER.info(f"Writing perigee data to {path}")
         np.savez_compressed(path, **dc)
