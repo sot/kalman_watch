@@ -349,6 +349,8 @@ def main(args=None):
 
     OPTIONS.update({
         "data_dir": opt.data_dir,
+        "ir_thresholds_start": opt.ir_thresholds_start,
+        "ir_thresholds_stop": opt.ir_thresholds_stop,
     })
 
     # Intervals of NMAN within 100 minutes of perigee

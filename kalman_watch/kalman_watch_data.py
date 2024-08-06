@@ -126,7 +126,9 @@ OPTIONS = Options(
         / "data"
         / "stk_radiation"
         / "rad_data_2022:003:12:00:00.000-2025:365:11:59:59.000.fits"
-    )
+    ),
+    ir_thresholds_start="2023:100",
+    ir_thresholds_stop="2023:200",
 )
 
 
@@ -558,10 +560,9 @@ class EventPerigee:
                 mon = get_mon_dataset(
                     manvr["datestart"],
                     manvr["datestop"],
-                    # the following should be configured somehow
-                    ir_thresholds_start="2023:100",
-                    ir_thresholds_stop="2023:200",
-                    data_dir="/Users/javierg/SAO/git/kalman_watch/kalman_watch3_data",
+                    ir_thresholds_start=OPTIONS["ir_thresholds_start"],
+                    ir_thresholds_stop=OPTIONS["ir_thresholds_stop"],
+                    data_dir=OPTIONS["data_dir"],
                     cache=True,
                 )
                 mons.append(mon)
