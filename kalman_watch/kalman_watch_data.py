@@ -121,6 +121,12 @@ OPTIONS = Options(
     perigee_info_basename="info.json",
     perigee_index_basename="kalman_perigees.ecsv",
     perigee_dir_basename="perigees",
+    rad_table_path=str(
+        Path(os.environ["SKA"])
+        / "data"
+        / "stk_radiation"
+        / "rad_data_2022:003:12:00:00.000-2025:365:11:59:59.000.fits"
+    )
 )
 
 
@@ -1259,7 +1265,7 @@ def get_kalman_drops_npnt(start, stop, duration=100) -> list[KalmanDropsData]:
 
 @functools.lru_cache()
 def get_rad_table():
-    rad_table = Table.read(Path(os.environ["SKA"]) / "data" / "stk_radiation" / "rad_data_2022:003:12:00:00.000-2025:365:11:59:59.000.fits")
+    rad_table = Table.read(OPTIONS["rad_table_path"])
     rad_table["time"] = CxoTime(rad_table["time"])
     return rad_table
 
