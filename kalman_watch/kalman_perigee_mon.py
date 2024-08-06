@@ -3,7 +3,9 @@
 
 import argparse
 import calendar
+import functools
 import json
+import os
 import re
 from itertools import cycle
 from pathlib import Path
@@ -393,6 +395,13 @@ def send_process_mail(opt, evts_perigee):
     send_mail(LOGGER, opt, subject, text, __file__)
 
 
+@functools.lru_cache()
+def get_rad_table():
+    rad_table = Table.read(Path(os.environ["SKA"]) / "data" / "stk_radiation" / "rad_data_2022:003:12:00:00.000-2025:365:11:59:59.000.fits")
+    rad_table["time"] = CxoTime(rad_table["time"])
+    return rad_table
+
+
 class EventPerigee:
     """Class for tracking Kalman star data through perigee."""
 
@@ -565,6 +574,23 @@ class EventPerigee:
             info[f"n{nle}_cnt"] = low_kals.meta[f"n{nle}_cnt"]
         return info
 
+    @property
+    def predicted_kalman_drops(self):
+        if not hasattr(self, "_info"):
+            self._predicted_kalman_drops = self._get_predicted_kalman_drops()
+        return self._predicted_kalman_drops
+
+    def _get_predicted_kalman_drops(self):
+        # result of a linear fit of kalman_drops vs proton_26_300_MeV
+        b, a = 1.72306678e-09, 0.011492516864638577
+        rad_table = get_rad_table()
+        sel = (rad_table["time"] >= self.rad_entry) & (rad_table["time"] <= self.rad_exit)
+        predicted_kalman_drops = {
+            "times": (rad_table["time"][sel] - self.perigee).sec,
+            "values": a + rad_table["proton_26_300_MeV"][sel] * b,
+        }
+        return predicted_kalman_drops
+
     def write_info(self, opt):
         """Write info to file"""
         path = EVT_PERIGEE_INFO_PATH(opt.data_dir, self)
@@ -696,7 +722,7 @@ class EventPerigee:
         perigee_times = perigee_times.round(1)
         aokalstr = self.data["aokalstr"]
 
-        fig = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.1)  # type: pgo.FigureWidget
+        fig = make_subplots(rows=4, cols=1, shared_xaxes=True, vertical_spacing=0.1)  # type: pgo.FigureWidget
 
         for obs, color in zip(self.obss, cycle(COLOR_CYCLE)):
             obs_tstart_rel = CxoTime(obs["obs_start"]).secs - self.perigee.cxcsec
@@ -733,10 +759,46 @@ class EventPerigee:
             )
             fig.add_trace(trace, row=3, col=1)
 
+        fig.add_trace(
+            pgo.Scatter(
+                x=self.predicted_kalman_drops["times"],
+                y=self.predicted_kalman_drops["values"],
+                name="Rad. model",
+                line={"color": "black"},
+            ),
+            row=4,
+            col=1
+        )
+        kalman_drops_nman = self.get_kalman_drops_nman()
+        fig.add_trace(
+            pgo.Scatter(
+                x=kalman_drops_nman["times"],
+                y=kalman_drops_nman["values"],
+                name="NMAN",
+                mode="markers",
+                marker={"color": px.colors.qualitative.Plotly[0], "size": 5},
+            ),
+            row=4,
+            col=1
+        )
+        kalman_drops_npnt = self.get_kalman_drops_npnt()
+        fig.add_trace(
+            pgo.Scatter(
+                x=kalman_drops_npnt["times"],
+                y=kalman_drops_npnt["values"],
+                name="NPNT",
+                mode="markers",
+                marker={"color": px.colors.qualitative.Plotly[1], "size": 5},
+            ),
+            row=4,
+            col=1
+        )
+
         # fig.update(layout=layout, row=2, col=1)
         fig.update_yaxes(range=[-0.5, 8.5], row=1, col=1, title_text="AOKALSTR")
         fig.update_yaxes(range=[-0.5, 8.5], row=2, col=1, title_text="Slot")
         fig.update_yaxes(row=3, col=1, title_text="Att Err (arcsec)")
+        fig.update_yaxes(range=[-0.1, 1.1], row=4, col=1, title_text="IR flag rate")
         fig.update_xaxes(title_text=f"Time relative to {date_perigee}", row=2, col=1)
 
         return fig
@@ -830,7 +892,151 @@ class EventPerigee:
         )
 
         return trace
+    
+    def get_kalman_drops_nman(self):
+        # having this at top-level might create a circular import
+        from kalman_watch.monitor_win_perigee import (
+            get_manvrs_perigee, get_mon_dataset, get_kalman_drops_nman, NotEnoughImagesError
+        )
 
+        # Intervals of NMAN within 100 minutes of perigee
+        manvrs_perigee = get_manvrs_perigee(self.rad_entry, self.rad_exit)
+
+        # Get list of monitor window data for each perigee maneuver
+        mons = []
+        for manvr in manvrs_perigee:
+            try:
+                mon = get_mon_dataset(
+                    manvr["datestart"],
+                    manvr["datestop"],
+                    # the following should be configured somehow
+                    ir_thresholds_start="2023:100",
+                    ir_thresholds_stop="2023:200",
+                    data_dir="/Users/javierg/SAO/git/kalman_watch/kalman_watch3_data",
+                    cache=True,
+                )
+                mons.append(mon)
+            except NotEnoughImagesError:
+                # logger.warning(err)
+                pass
+
+        if not mons:
+            return {
+                "times": np.array([]),
+                "values": np.array([]),
+            }
+
+        kalman_drops_nman_list = [get_kalman_drops_nman(mon) for mon in mons]
+
+        nman_table = vstack([
+            table_from_perigee(kalman_drops)
+            for kalman_drops in kalman_drops_nman_list
+            if len(kalman_drops.times) > 0
+        ])
+        nman_table.sort("cxcsec")
+
+        result = {
+            "times": np.asarray(nman_table["time"]),
+            "values": np.asarray(nman_table["kalman_drops"]),
+        }
+
+        return result
+
+
+    def get_kalman_drops_npnt(self):
+
+        if self.tlm is None or len(self.data["times"]) <= 200:
+            return {
+                "times": np.array([]),
+                "values": np.array([]),
+            }
+
+        times_from_perigee, n_drops = self._get_binned_drops_from_npnt()
+        result = {
+            "times": times_from_perigee,
+            "values": n_drops,
+        }
+
+        return result
+
+
+    def _get_binned_drops_from_npnt(self) -> tuple[np.ndarray, np.ndarray]:
+        """Get the fraction of IR flags per "minute" from NPNT telemetry.
+
+        Here a "minute" is really 60 * 1.025 seconds = 61.5, or 1.025 minutes. This
+        corresponds to exactly 30 ACA image readouts (2.05 sec per image) per "minute".
+
+        Parameters
+        ----------
+        ep : EventPerigee
+            Perigee event object with relevant ACA telemetry from one perigee
+
+        Returns
+        -------
+        time_means : np.ndarray
+            Array of mean time from perigee (sec) in each bin
+        ir_flag_fracs : np.ndarray
+            Array of fraction of IR flags set in each bin
+        """
+        # Select only data in AOPCADMD in NPNT and AOACASEQ in KALM
+        npnt_kalm = self.data["npnt_kalm"]
+        # Time from perigee in seconds
+        times_from_perigee = self.data["perigee_times"][npnt_kalm]
+        if len(times_from_perigee) == 0:
+            return np.array([]), np.array([])
+        ir_count = np.zeros(times_from_perigee.shape, dtype=int)
+        n_samp = np.zeros(times_from_perigee.shape, dtype=int)
+
+        # Count number of IR flags set for each slot when slot is tracking
+        for slot in range(8):
+            ir_count[:] += np.where(
+                self.data[f"aca_ir{slot}"][npnt_kalm]
+                & self.data[f"aca_track{slot}"][npnt_kalm],
+                1,
+                0,
+            )
+
+        # Count number of slot-samples when slot is tracking
+        for slot in range(8):
+            n_samp[:] += np.where(
+                self.data[f"aca_track{slot}"][npnt_kalm],
+                1,
+                0,
+            )
+
+        tbl = Table()
+        tbl["idx"] = (times_from_perigee // (60 * 1.025)).astype(int)
+        tbl["times_from_perigee"] = times_from_perigee
+        tbl["ir_count"] = ir_count
+        tbl["n_samp"] = n_samp
+        tbl_grp = tbl.group_by("idx")
+
+        time_means = []
+        ir_flag_fracs = []
+        for i0, i1 in zip(tbl_grp.groups.indices[:-1], tbl_grp.groups.indices[1:]):
+            # For a fully-sampled "minute" there are 30 ACA telemetry samples (2.05 sec per
+            # sample) times 8 slots = 240 potential samples. Require at least half of
+            # samples in a "minute" in order to return a count, otherwise just no data.
+            n_samp = np.sum(tbl_grp["n_samp"][i0:i1])
+            if n_samp > 120:
+                time_means.append(np.mean(tbl_grp["times_from_perigee"][i0:i1]))
+                # Calculate fraction of available samples that have IR flag set
+                ir_flag_fracs.append(np.sum(tbl_grp["ir_count"][i0:i1]) / n_samp)
+
+        return np.array(time_means), np.array(ir_flag_fracs)
+
+
+def table_from_perigee(perigee):
+    perigee_time = CxoTime(perigee.perigee_date).cxcsec
+    table = Table()
+    table["time"] = perigee.times
+    table["kalman_drops"] = perigee.kalman_drops
+    table["perigee"] = perigee.perigee_date
+    table["perigee_cxcsec"] = perigee_time
+    # why does the following give a different (and wrong) result?
+    # table["cxcsec"] = perigee_time + perigee.times
+    table["cxcsec"] = table["perigee_cxcsec"] + perigee.times
+    return table
 
 if __name__ == "__main__":
     import os
