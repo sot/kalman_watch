@@ -18,12 +18,8 @@ from plotly.subplots import make_subplots
 from ska_helpers.logging import basic_logger
 from ska_helpers.run_info import log_run_info
 
-from kalman_watch import __version__
+from kalman_watch import __version__, OPTIONS, paths
 from kalman_watch.kalman_watch_data import (
-    PERIGEES_INDEX_TABLE_PATH,
-    EVT_PERIGEE_DATA_PATH,
-    EVT_PERIGEE_DIR_PATH,
-    PERIGEES_DIR_PATH,
     get_dirname,
     EventPerigee,
     get_stats,
@@ -98,10 +94,12 @@ def main(sys_args=None):
     opt: argparse.Namespace = get_opt().parse_args(sys_args)
     log_run_info(LOGGER.info, opt, version=__version__)
 
+    OPTIONS.data_dir = opt.data_dir
+
     stop = CxoTime(opt.stop)
     start: CxoTime = stop - opt.lookback * u.day
 
-    stats_prev = read_kalman_stats(opt)
+    stats_prev = read_kalman_stats()
     evts_perigee = get_evts_perigee(start, stop, stats_prev)
 
     # Bail out if there are no new perigee events. Since we backed up to the
@@ -111,15 +109,15 @@ def main(sys_args=None):
         return
 
     for evt_perigee in evts_perigee:
-        evt_perigee.write_data(opt)
-        evt_perigee.write_info(opt)
+        evt_perigee.write_data()
+        evt_perigee.write_info()
 
     stats_new = get_stats(evts_perigee)
     # Combine new and previous statistics summary
     stats_all = vstack([stats_new, stats_prev])
     stats_all.sort("perigee", reverse=True)
 
-    path = PERIGEES_INDEX_TABLE_PATH(opt.data_dir)
+    path = paths.perigees_index_table_path()
     LOGGER.info(f"Writing perigee data {path}")
     stats_all.write(path, format="ascii.ecsv", overwrite=True)
 
@@ -142,18 +140,17 @@ def main(sys_args=None):
             if stat["perigee"] < start.date:
                 break
             evt_tmp = EventPerigeeMon(stat["rad_entry"], stat["perigee"], stat["rad_exit"])
-            path = EVT_PERIGEE_DATA_PATH(opt.data_dir, evt_tmp)
-            evt = EventPerigeeMon.from_npz(path)
+            evt = EventPerigeeMon.from_npz(evt_tmp.data_path)
             evt.prev_date = date_prev
             evt.next_date = date_next
-            evt.make_detail_page(opt)
+            evt.make_detail_page()
 
-        make_index_list_pages(opt, stats_all)
+        make_index_list_pages(stats_all)
 
 
-def make_index_list_pages(opt, stats_all: Table) -> None:
+def make_index_list_pages(stats_all: Table) -> None:
     html = get_index_html_recent(stats_all)
-    path = PERIGEES_DIR_PATH(opt.data_dir) / "index.html"
+    path = paths.perigees_dir_path() / "index.html"
     LOGGER.info(f"Writing recent index list page to {path}")
     path.write_text(html)
 
@@ -162,7 +159,7 @@ def make_index_list_pages(opt, stats_all: Table) -> None:
     years_unique = sorted(np.unique(years_all))
     for year in years_unique[-2:]:
         html = get_index_html_year(stats_all, year)
-        path = PERIGEES_DIR_PATH(opt.data_dir) / str(year) / "index.html"
+        path = paths.perigees_dir_path() / str(year) / "index.html"
         path.parent.mkdir(parents=True, exist_ok=True)
         LOGGER.info(f"Writing index list page for {year} to {path}")
         path.write_text(html)
@@ -284,10 +281,10 @@ class EventPerigeeMon(EventPerigee):
 
         return html
 
-    def make_detail_page(self, opt):
+    def make_detail_page(self):
         html = self.get_detail_html()
 
-        dirname_path = EVT_PERIGEE_DIR_PATH(opt.data_dir, self)
+        dirname_path = self.dir_path
         dirname_path.mkdir(parents=True, exist_ok=True)
         path = dirname_path / "index.html"
         LOGGER.info(f"Writing perigee detail page to {path}")

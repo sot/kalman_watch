@@ -4,7 +4,6 @@
 import calendar
 import functools
 import json
-import os
 import re
 from pathlib import Path
 from typing import List, Union
@@ -33,6 +32,8 @@ from chandra_aca.maude_decom import get_aca_images
 from chandra_aca.transform import mag_to_count_rate
 from kadi.commands import get_starcats
 
+from kalman_watch import OPTIONS, paths
+
 
 LOGGER = basic_logger(__name__, level="INFO")
 
@@ -41,26 +42,6 @@ FILE_DIR = Path(__file__).parent
 
 # Sub-sample attitude error by 8 to reduce the number of points.
 ATT_ERR_SUBSAMP = 8
-
-
-def PERIGEES_DIR_PATH(data_dir: str) -> Path:
-    return Path(data_dir) / "perigees"
-
-
-def PERIGEES_INDEX_TABLE_PATH(data_dir: str) -> Path:
-    return PERIGEES_DIR_PATH(data_dir) / "kalman_perigees.ecsv"
-
-
-def EVT_PERIGEE_DATA_PATH(data_dir: str, evt: "EventPerigee") -> Path:
-    return EVT_PERIGEE_DIR_PATH(data_dir, evt) / "data.npz"
-
-
-def EVT_PERIGEE_INFO_PATH(data_dir: str, evt: "EventPerigee") -> Path:
-    return EVT_PERIGEE_DIR_PATH(data_dir, evt) / "info.json"
-
-
-def EVT_PERIGEE_DIR_PATH(data_dir: str, evt: "EventPerigee"):
-    return PERIGEES_DIR_PATH(data_dir) / evt.dirname
 
 
 # Default Kalman low intervals thresholds (n_kalstr, dur_limit) for
@@ -82,21 +63,21 @@ def get_dirname(date: Union[CxoTime, None]) -> str:
     return out
 
 
-def read_kalman_stats(opt, from_info=False) -> Table:
+def read_kalman_stats(from_info=False) -> Table:
     """Read kalman stats from file or from event info.json files.
 
     If ``from_info`` is True, read all individual event info files instead of
     the data file. This is also tried if the kalman stats file does not exist,
     which allows re-generating the kalman stats file.
     """
-    path = PERIGEES_INDEX_TABLE_PATH(opt.data_dir)
+    path = paths.perigees_index_table_path()
     if path.exists() and not from_info:
         LOGGER.info(f"Reading kalman perigee data from {path}")
         kalman_stats = Table.read(path)
     else:
         rows = []
         # Look for files like 2019/Jan-12/info.json
-        for info_file in PERIGEES_DIR_PATH(opt.data_dir).glob("????/??????/info.json"):
+        for info_file in paths.perigees_dir_path().glob("????/??????/info.json"):
             if re.search(r"\d{4}/\w{3}-\d{2}/info\.json", info_file.as_posix()):
                 LOGGER.info(f"Reading kalman perigee data from {info_file}")
                 info = json.loads(info_file.read_text())
@@ -258,6 +239,18 @@ class EventPerigee:
         return get_dirname(self.perigee)
 
     @property
+    def dir_path(self):
+        return paths.perigees_dir_path() / self.dirname
+
+    @property
+    def data_path(self):
+        return self.dir_path / OPTIONS.perigee_event_basename
+
+    @property
+    def info_path(self):
+        return self.dir_path / OPTIONS.perigee_info_basename
+
+    @property
     def obss(self):
         if not hasattr(self, "_obss"):
             LOGGER.info(f"Getting observations from kadi commands for {self.dirname}")
@@ -388,13 +381,13 @@ class EventPerigee:
         }
         return predicted_kalman_drops
 
-    def write_info(self, opt):
+    def write_info(self):
         """Write info to file"""
-        path = EVT_PERIGEE_INFO_PATH(opt.data_dir, self)
+        path = self.info_path
         LOGGER.info(f"Writing info to {path}")
         path.write_text(json.dumps(self.info, indent=4))
 
-    def write_data(self, opt):
+    def write_data(self):
         # Compressed version of data
         dc = {}
 
@@ -422,7 +415,7 @@ class EventPerigee:
             dc["aca_track"] |= self.data[f"aca_track{slot}"].astype(np.uint8) << slot
             dc["aca_ir"] |= self.data[f"aca_ir{slot}"].astype(np.uint8) << slot
 
-        path = EVT_PERIGEE_DATA_PATH(opt.data_dir, self)
+        path = self.data_path
         path.parent.mkdir(parents=True, exist_ok=True)
         LOGGER.info(f"Writing perigee data to {path}")
         np.savez_compressed(path, **dc)
@@ -491,10 +484,9 @@ class EventPerigee:
                 mon = get_mon_dataset(
                     manvr["datestart"],
                     manvr["datestop"],
-                    # the following should be configured somehow
-                    ir_thresholds_start="2023:100",
-                    ir_thresholds_stop="2023:200",
-                    data_dir="/Users/javierg/SAO/git/kalman_watch/kalman_watch3_data",
+                    ir_thresholds_start=OPTIONS.ir_thresholds_start,
+                    ir_thresholds_stop=OPTIONS.ir_thresholds_stop,
+                    data_dir=paths.data_dir(),
                     cache=True,
                 )
                 mons.append(mon)
@@ -1198,7 +1190,7 @@ def get_kalman_drops_npnt(start, stop, duration=100) -> list[KalmanDropsData]:
 
 @functools.lru_cache()
 def get_rad_table():
-    rad_table = Table.read(Path(os.environ["SKA"]) / "data" / "stk_radiation" / "rad_data_2022:003:12:00:00.000-2025:365:11:59:59.000.fits")
+    rad_table = Table.read(OPTIONS.rad_table_path)
     rad_table["time"] = CxoTime(rad_table["time"])
     return rad_table
 
