@@ -95,6 +95,7 @@ def get_opt() -> argparse.ArgumentParser:
             " (set to 0 to disable caching)"
         ),
     )
+    parser.add_argument("--rad-data", type=str, help="Radiation data from STK")
     return parser
 
 
@@ -349,6 +350,8 @@ def main(args=None):
     OPTIONS.data_dir = opt.data_dir
     OPTIONS.ir_thresholds_start = opt.ir_thresholds_start
     OPTIONS.ir_thresholds_stop = opt.ir_thresholds_stop
+    if opt.rad_data is not None:
+        OPTIONS.rad_table_path = opt.rad_data
 
     # Intervals of NMAN within 100 minutes of perigee
     manvrs_perigee = [] if opt.skip_mon else get_manvrs_perigee(start, stop)

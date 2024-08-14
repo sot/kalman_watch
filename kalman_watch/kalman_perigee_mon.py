@@ -77,6 +77,7 @@ def get_opt() -> argparse.ArgumentParser:
         "--lookback", type=float, default=14, help="Lookback time (days, default=14)"
     )
     parser.add_argument("--data-dir", type=str, default=".", help="Data directory")
+    parser.add_argument("--rad-data", type=str, help="Radiation data from STK")
     parser.add_argument(
         "--email",
         action="append",
@@ -95,6 +96,8 @@ def main(sys_args=None):
     log_run_info(LOGGER.info, opt, version=__version__)
 
     OPTIONS.data_dir = opt.data_dir
+    if opt.rad_data is not None:
+        OPTIONS.rad_table_path = opt.rad_data
 
     stop = CxoTime(opt.stop)
     start: CxoTime = stop - opt.lookback * u.day
