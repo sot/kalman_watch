@@ -372,7 +372,7 @@ class EventPerigee:
 
     def _get_predicted_kalman_drops(self):
         # result of a linear fit of kalman_drops vs proton_26_300_MeV
-        b, a = 1.72306678e-09, 0.011492516864638577
+        a, b = 0.00954, 1.747e-09
         rad_table = get_rad_table()
         sel = (rad_table["time"] >= self.rad_entry) & (rad_table["time"] <= self.rad_exit)
         predicted_kalman_drops = {
