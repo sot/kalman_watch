@@ -177,11 +177,16 @@ def plot_mon_win_and_aokalstr_composite_plotly(
     if not title:
         title = f"IR flag fraction near perigee {kalman_drops_npnt_list.start.iso[:7]}"
 
-    nman_table = vstack([table_from_perigee(kalman_drops) for kalman_drops in kalman_drops_nman_list if len(kalman_drops.times) > 0])
-    nman_table["type"] = 0
+    tables = []
+    if len(kalman_drops_nman_list) > 0:
+        # this happens at times before the monitoring windows were implemented
+        nman_table = vstack([table_from_perigee(kalman_drops) for kalman_drops in kalman_drops_nman_list if len(kalman_drops.times) > 0])
+        nman_table["type"] = 0
+        tables.append(kalman_drops_nman_list)
     npnt_table = vstack([table_from_perigee(kalman_drops) for kalman_drops in kalman_drops_npnt_list if len(kalman_drops.times) > 0])
     npnt_table["type"] = 1
-    table = vstack([nman_table, npnt_table])
+    tables.append(npnt_table)
+    table = vstack(tables)
     # type 0 first, because that determines the marker in the legend
     table.sort(["type", "cxcsec"])
 
