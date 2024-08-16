@@ -469,11 +469,6 @@ class EventPerigee:
         return low_kalmans
 
     def get_kalman_drops_nman(self):
-        # having this at top-level might create a circular import
-        from kalman_watch.monitor_win_perigee import (
-            get_mon_dataset, get_kalman_drops_nman, NotEnoughImagesError
-        )
-
         # Intervals of NMAN within 100 minutes of perigee
         manvrs_perigee = get_manvrs_perigee(self.rad_entry, self.rad_exit)
 
