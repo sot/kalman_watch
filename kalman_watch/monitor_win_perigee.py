@@ -182,7 +182,7 @@ def plot_mon_win_and_aokalstr_composite_plotly(
         # this happens at times before the monitoring windows were implemented
         nman_table = vstack([table_from_perigee(kalman_drops) for kalman_drops in kalman_drops_nman_list if len(kalman_drops.times) > 0])
         nman_table["type"] = 0
-        tables.append(kalman_drops_nman_list)
+        tables.append(nman_table)
     npnt_table = vstack([table_from_perigee(kalman_drops) for kalman_drops in kalman_drops_npnt_list if len(kalman_drops.times) > 0])
     npnt_table["type"] = 1
     tables.append(npnt_table)
