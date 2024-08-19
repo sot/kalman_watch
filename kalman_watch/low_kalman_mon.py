@@ -90,7 +90,12 @@ def main(sys_args=None):
     start = stop - opt.lookback * u.day  # type: CxoTime
     date_telem_last = CxoTime(lowkals_prev.meta.pop("date_telem_last", "1999:001"))
     if start < date_telem_last:
+        logger.info("Overriding starting time with the time of latest low-kalman event")
         start = date_telem_last
+
+    if stop <= start:
+        logger.error(f"Starting time happens after stopping time ({start.date} > {stop.date})")
+        return 1
 
     lowkals_new = get_lowkals_new(opt, start, stop, date_telem_last)
     lowkals = vstack([lowkals_new, lowkals_prev])  # type: Table
@@ -117,6 +122,7 @@ def get_lowkals_new(
     # Get the AOKALSTR data with number of kalman stars reported by OBC.
     logger.info(f"Getting telemetry between {start} and {stop}")
 
+    print(start, stop)
     dat = fetch.Msidset(["aokalstr", "aoacaseq", "aopcadmd", "cobsrqid"], start, stop)
     dat.interpolate(1.025)
 
