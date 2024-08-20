@@ -1,4 +1,5 @@
 **/__pycache__
 **/build
 .eggs
+*egg-info
 kalman_watch3_data
