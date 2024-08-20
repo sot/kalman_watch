@@ -98,7 +98,7 @@ def get_opt() -> argparse.ArgumentParser:
     parser.add_argument(
         "--out-file",
         help=(
-            "Output file name. Allowed extensions: html, png "
+            "Output file name relative to data-dir. Allowed extensions: html, png "
             "(default=<data_dir>/kalman_plot_{start}-{stop}.html)"
         ),
     )
@@ -126,18 +126,21 @@ def get_color_marker_for_perigee_plotly(perigee_date: str) -> tuple[str, str]:
     """
     if perigee_date not in PERIGEE_COLOR_MARKERS_PLOTLY:
         n_perigees = len(PERIGEE_COLOR_MARKERS_PLOTLY)
-        colors = px.colors.qualitative.D3
+        # Paul Tol"s vibrant palette (https://personal.sron.nl/~pault/)
+        # colors = [
+        #     "#332288", "#88CCEE", "#44AA99", "#117733", "#999933",
+        #     "#DDCC77", "#CC6677", "#882255", "#AA4499"
+        # ]
+        colors = px.colors.qualitative.Vivid
         markers = [
-            'circle',
-            'square',
-            'diamond',
-            'cross',
-            'x',
-            'triangle-up',
-            'triangle-down',
-            'triangle-left',
-            'triangle-right',
-            ]
+            "circle",
+            "square",
+            "diamond",
+            "triangle-up",
+            "triangle-down",
+            "triangle-left",
+            "triangle-right",
+        ]
         color = colors[n_perigees % len(colors)]
         marker = markers[n_perigees % len(markers)]
         PERIGEE_COLOR_MARKERS_PLOTLY[perigee_date] = (color, marker)
@@ -204,9 +207,10 @@ def plot_mon_win_and_aokalstr_composite_plotly(
     for perigee_date in perigee_dates:
         color, marker = get_color_marker_for_perigee_plotly(perigee_date)
         ok = table["perigee"] == perigee_date
+        # NPNT data (type 1) is marked with open markers and a thicker line than NMAN data (type 0)
         markers = np.where(table["type"][ok] == 0, marker, f"{marker}-open")
-        marker_size = np.where(table["type"][ok] == 0, 5, 5)
-        line_width = np.where(table["type"][ok] == 0, 0, 1)
+        marker_size = np.where(table["type"][ok] == 0, 6, 6)
+        line_width = np.where(table["type"][ok] == 0, 0.85, 1)
         traces[perigee_date] = {
             "times": table["time"][ok] / 60,
             "values": table["kalman_drops"][ok],
@@ -222,6 +226,9 @@ def plot_mon_win_and_aokalstr_composite_plotly(
     logger.info("plotting predictions")
     for idx, pred_win_kalman_drops in enumerate(kalman_drops_prediction_list):
         perigee_date = pred_win_kalman_drops.perigee_date
+        if perigee_date not in perigee_dates:
+            logger.info(f"Skipping prediction for {perigee_date} because there is no observed data")
+            continue
         color, marker = get_color_marker_for_perigee_plotly(pred_win_kalman_drops.perigee_date.date)
         if len(pred_win_kalman_drops.times) > 0:
             plotly_traces.append(f"pred-{perigee_date}")
@@ -248,7 +255,7 @@ def plot_mon_win_and_aokalstr_composite_plotly(
                     "color": trace["colors"],
                     "opacity": 0.7,
                     "symbol": trace["marker"],
-                    "line_width": trace["line_width"],
+                    "line": {"width": trace["line_width"], "color": "DarkSlateGrey"},
                 },
                 mode="markers",
                 name=f"{perigee_date[5:8]} {perigee_date[9:11]}{perigee_date[12:14]}z",
@@ -262,8 +269,8 @@ def plot_mon_win_and_aokalstr_composite_plotly(
         template="seaborn",
         xaxis_title="Time from perigee (minutes)",
         autosize=False,
-        width=1000,
-        height=600,
+        width=1100,
+        height=500,
         xaxis = {
             "tickmode": 'linear',
             "tick0": -100,
