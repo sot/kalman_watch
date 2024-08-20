@@ -132,7 +132,7 @@ def get_lowkals_new(
     dat.interpolate(1.025)
 
     if len(dat.times) < 300:
-        logger.warning(f"WARNING: Not enough data to find low Kalman intervals")
+        logger.warning("WARNING: Not enough data to find low Kalman intervals")
         lowkals = LOWKALS_EMPTY.copy()
         lowkals.meta["date_telem_last"] = date_telem_last.date
         return lowkals
@@ -210,11 +210,11 @@ def get_plot_html(opt, lowkals: Table, show=False) -> str:
         {
             "xaxis_autorange": False,
             "title": (
-                f"Duration of contiguous n_kalman <= 1 (autoscale for full mission)"
+                "Duration of contiguous n_kalman <= 1 (autoscale for full mission)"
             ),
             "yaxis": {"title": "Duration (sec)", "autorange": False, "range": [0, 35]},
             "xaxis": {
-                "title": f"Date",
+                "title": "Date",
                 "range": [
                     (CxoTime.now() - 5 * 365 * u.day).datetime,
                     CxoTime.now().datetime,
