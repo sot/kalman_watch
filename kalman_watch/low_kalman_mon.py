@@ -75,6 +75,11 @@ def get_opt():
         default=30.0,
         help="Number of days to highlight in plots and table (days, default=30)",
     )
+    parser.add_argument(
+        "--in-file",
+        default="kalman_plot.html",
+        help="Input file with monitor-window data",
+    )
     return parser
 
 

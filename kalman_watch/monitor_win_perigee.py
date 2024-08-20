@@ -95,6 +95,13 @@ def get_opt() -> argparse.ArgumentParser:
             " (set to 0 to disable caching)"
         ),
     )
+    parser.add_argument(
+        "--out-file",
+        help=(
+            "Output file name. Allowed extensions: html, png "
+            "(default=<data_dir>/kalman_plot_{start}-{stop}.html)"
+        ),
+    )
     parser.add_argument("--rad-data", type=str, help="Radiation data from STK")
     return parser
 
@@ -310,17 +317,18 @@ def plot_mon_win_and_aokalstr_composite_plotly(
             ),
         ]
     )
-
     if outfile:
-        kalman_plot_html = fig.to_html(
-            full_html=False,
-            include_plotlyjs="cdn",
-            default_width=1000,
-            default_height=600,
-            config={"displayModeBar": True},
-        )
-        with open(outfile, "w") as fh:
-            fh.write(kalman_plot_html)
+        outfile.parent.mkdir(parents=True, exist_ok=True)
+        if outfile.suffix == ".html":
+            kalman_plot_html = fig.to_html(
+                full_html=False,
+                include_plotlyjs="cdn",
+                config={"displayModeBar": True},
+            )
+            with open(outfile, "w") as fh:
+                fh.write(kalman_plot_html)
+        elif outfile.suffix == ".png":
+            fig.write_image(outfile)
 
 
 def cxotime_reldate(date):
@@ -389,7 +397,11 @@ def main(args=None):
 
     kalman_drops_prediction_list = get_kalman_drops_prediction(start, stop)
 
-    outfile = Path(opt.data_dir) / "kalman_plot.html"
+    if opt.out_file:
+        outfile = opt.out_file
+    else:
+        outfile = f"mon_win_kalman_drops_{opt.start}_{opt.stop}.html"
+    outfile = Path(opt.data_dir) / outfile
     title = f"IR flag fraction {start.date[:8]} to {stop.date[:8]}"
 
     plot_mon_win_and_aokalstr_composite_plotly(
