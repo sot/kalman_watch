@@ -731,7 +731,7 @@ def get_aca_images_cached(
         out = Table.read(cache_file)
     else:
         out = get_aca_images(start, stop)
-        cache_file.parent.mkdir(exist_ok=True)
+        cache_file.parent.mkdir(exist_ok=True, parents=True)
         out.write(cache_file)
 
     return out
