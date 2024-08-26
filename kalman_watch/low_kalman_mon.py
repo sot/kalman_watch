@@ -77,8 +77,8 @@ def get_opt():
     )
     parser.add_argument(
         "--in-file",
-        default="kalman_plot.html",
-        help="Input file with monitor-window data",
+        default="mon_win_kalman_drops_-45d_-1d.html",
+        help="Input file with monitor-window data. Default: mon_win_kalman_drops_-45d_-1d.html",
     )
     return parser
 

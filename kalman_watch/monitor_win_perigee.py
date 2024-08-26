@@ -7,7 +7,7 @@ the IR flag data (from AOACIIR<n>) during NPNT. This is used to evaluate the
 evolution of the high ionizing radiation (IR) zone during perigee.
 
 This is normally run as a script which by default generates a plot
-``<data_dir>/mon_win_kalman_drops_-45d_-1d.png`` in the current directory. It will also
+``<data_dir>/mon_win_kalman_drops_-45d_-1d.html`` in the current directory. It will also
 cache the MAUDE images in the ``<data_dir>/aca_imgs_cache/`` directory.
 
 NOTE: This script was originally written using AOKALSTR telemetry as a proxy for the IR
