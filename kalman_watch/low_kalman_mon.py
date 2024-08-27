@@ -252,7 +252,7 @@ def make_web_page(opt, lowkals: Table) -> None:
         tr_classes.append(tr_class)
     long_durs["tr_class"] = tr_classes
 
-    with open(Path(opt.data_dir) / "kalman_plot.html") as f:
+    with open(Path(opt.data_dir) / opt.in_file) as f:
         kalman_plot_html = f.read()
 
     index_template_html = INDEX_TEMPLATE_PATH().read_text()
