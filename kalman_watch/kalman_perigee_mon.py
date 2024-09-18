@@ -262,7 +262,7 @@ class EventPerigeeMon(EventPerigee):
             full_html=False,
             include_plotlyjs="cdn",
             default_width=1000,
-            default_height=600,
+            default_height=800,
         )
 
         has_low_kalmans = len(self.low_kalmans) > 0
