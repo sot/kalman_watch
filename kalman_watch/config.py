@@ -8,7 +8,7 @@ import astropy.config as _config_
 
 
 class ConfigNamespace(_config_.ConfigNamespace):
-    rootname = 'ska_trending'
+    rootname = 'kalman_watch'
 
     data_dir=_config_.ConfigItem(
         ".",
