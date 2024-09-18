@@ -32,7 +32,7 @@ from chandra_aca.maude_decom import get_aca_images
 from chandra_aca.transform import mag_to_count_rate
 from kadi.commands import get_starcats
 
-from kalman_watch import OPTIONS, paths
+from kalman_watch import conf, paths
 
 
 LOGGER = basic_logger(__name__, level="INFO")
@@ -244,11 +244,11 @@ class EventPerigee:
 
     @property
     def data_path(self):
-        return self.dir_path / OPTIONS.perigee_event_basename
+        return self.dir_path / conf.perigee_event_basename
 
     @property
     def info_path(self):
-        return self.dir_path / OPTIONS.perigee_info_basename
+        return self.dir_path / conf.perigee_info_basename
 
     @property
     def obss(self):
@@ -479,8 +479,8 @@ class EventPerigee:
                 mon = get_mon_dataset(
                     manvr["datestart"],
                     manvr["datestop"],
-                    ir_thresholds_start=OPTIONS.ir_thresholds_start,
-                    ir_thresholds_stop=OPTIONS.ir_thresholds_stop,
+                    ir_thresholds_start=conf.ir_thresholds_start,
+                    ir_thresholds_stop=conf.ir_thresholds_stop,
                     data_dir=paths.data_dir(),
                     cache=True,
                 )
@@ -1185,7 +1185,7 @@ def get_kalman_drops_npnt(start, stop, duration=100) -> list[KalmanDropsData]:
 
 @functools.lru_cache()
 def get_rad_table():
-    rad_table = Table.read(OPTIONS.rad_table_path)
+    rad_table = Table.read(conf.rad_table_path)
     rad_table["time"] = CxoTime(rad_table["time"])
     return rad_table
 

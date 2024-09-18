@@ -32,7 +32,7 @@ from cxotime import CxoTime
 from astropy.table import vstack
 from ska_helpers.logging import basic_logger
 
-from kalman_watch import __version__, OPTIONS
+from kalman_watch import __version__, conf
 from kalman_watch.kalman_watch_data import (
     NotEnoughImagesError,
     get_manvrs_perigee,
@@ -367,11 +367,11 @@ def main(args=None):
     start = cxotime_reldate(opt.start)
     stop = cxotime_reldate(opt.stop)
 
-    OPTIONS.data_dir = opt.data_dir
-    OPTIONS.ir_thresholds_start = opt.ir_thresholds_start
-    OPTIONS.ir_thresholds_stop = opt.ir_thresholds_stop
+    conf.data_dir = opt.data_dir
+    conf.ir_thresholds_start = opt.ir_thresholds_start
+    conf.ir_thresholds_stop = opt.ir_thresholds_stop
     if opt.rad_data is not None:
-        OPTIONS.rad_table_path = opt.rad_data
+        conf.rad_table_path = opt.rad_data
 
     # Intervals of NMAN within 100 minutes of perigee
     manvrs_perigee = [] if opt.skip_mon else get_manvrs_perigee(start, stop)

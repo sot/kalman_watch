@@ -18,7 +18,7 @@ from plotly.subplots import make_subplots
 from ska_helpers.logging import basic_logger
 from ska_helpers.run_info import log_run_info
 
-from kalman_watch import __version__, OPTIONS, paths
+from kalman_watch import __version__, conf, paths
 from kalman_watch.kalman_watch_data import (
     get_dirname,
     EventPerigee,
@@ -95,9 +95,9 @@ def main(sys_args=None):
     opt: argparse.Namespace = get_opt().parse_args(sys_args)
     log_run_info(LOGGER.info, opt, version=__version__)
 
-    OPTIONS.data_dir = opt.data_dir
+    conf.data_dir = opt.data_dir
     if opt.rad_data is not None:
-        OPTIONS.rad_table_path = opt.rad_data
+        conf.rad_table_path = opt.rad_data
 
     stop = CxoTime(opt.stop)
     start: CxoTime = stop - opt.lookback * u.day

@@ -52,4 +52,4 @@ class ConfigNamespace(_config_.ConfigNamespace):
         return pformat({k: getattr(self, k) for k in self})
 
 
-OPTIONS = ConfigNamespace()
+conf = ConfigNamespace()
