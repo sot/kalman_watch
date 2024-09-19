@@ -76,8 +76,18 @@ def get_opt() -> argparse.ArgumentParser:
     parser.add_argument(
         "--lookback", type=float, default=14, help="Lookback time (days, default=14)"
     )
-    parser.add_argument("--data-dir", type=str, default=".", help="Data directory")
-    parser.add_argument("--rad-data", type=str, help="Radiation data from STK")
+    parser.add_argument(
+        "--data-dir",
+        type=Path,
+        default=paths.data_dir(),
+        help=f"Data directory (default={paths.data_dir()})"
+    )
+    parser.add_argument(
+        "--rad-data",
+        type=Path,
+        default=paths.rad_table_path(),
+        help=f"Radiation data from STK (default={paths.rad_table_path()})"
+    )
     parser.add_argument(
         "--email",
         action="append",

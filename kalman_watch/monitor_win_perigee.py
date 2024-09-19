@@ -33,7 +33,7 @@ from cxotime import CxoTime
 from astropy.table import vstack
 from ska_helpers.logging import basic_logger
 
-from kalman_watch import __version__, conf
+from kalman_watch import __version__, conf, paths
 from kalman_watch.kalman_watch_data import (
     get_kalman_drops_nman,
     get_kalman_drops_npnt,
@@ -62,16 +62,19 @@ def get_opt() -> argparse.ArgumentParser:
         "--stop", type=str, default="-1d", help="Stop date (default=-1d from now)"
     )
     parser.add_argument(
-        "--data-dir", type=str, default=".", help="Data directory (default=.)"
+        "--data-dir",
+        type=Path,
+        default=paths.data_dir(),
+        help=f"Data directory (default={paths.data_dir()})"
     )
     parser.add_argument(
         "--ir-thresholds-start",
-        default="2023:100",
+        default=conf.ir_thresholds_start,
         help="Start date for sampling guide stars for IR thresholds",
     )
     parser.add_argument(
         "--ir-thresholds-stop",
-        default="2023:200",
+        default=conf.ir_thresholds_stop,
         help="Stop date for sampling guide stars for IR thresholds",
     )
     parser.add_argument(

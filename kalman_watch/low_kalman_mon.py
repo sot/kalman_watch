@@ -18,7 +18,7 @@ from Ska.engarchive import fetch
 from Ska.engarchive.utils import logical_intervals
 from ska_helpers.logging import basic_logger
 
-from . import __version__
+from kalman_watch import __version__, paths
 
 # Constants and file path definitions
 FILE_DIR = Path(__file__).parent
@@ -56,7 +56,12 @@ def get_opt():
         default=14,
         help="Lookback days from stop for processing (days, default=14)",
     )
-    parser.add_argument("--data-dir", type=str, default=".", help="Data directory")
+    parser.add_argument(
+        "--data-dir",
+        type=Path,
+        default=paths.data_dir(),
+        help=f"Data directory (default={paths.data_dir()})"
+    )
     parser.add_argument(
         "--long-duration",
         type=float,
