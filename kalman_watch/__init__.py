@@ -2,6 +2,7 @@
 """
 Ska_helpers is a collection of utilities for the Ska3 runtime environment.
 """
+
 from ska_helpers.version import get_version
 from .config import conf  # noqa: F401
 

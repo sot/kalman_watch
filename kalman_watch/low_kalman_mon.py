@@ -60,7 +60,7 @@ def get_opt():
         "--data-dir",
         type=Path,
         default=paths.data_dir(),
-        help=f"Data directory (default={paths.data_dir()})"
+        help=f"Data directory (default={paths.data_dir()})",
     )
     parser.add_argument(
         "--long-duration",
@@ -104,7 +104,9 @@ def main(sys_args=None):
         start = date_telem_last
 
     if stop <= start:
-        logger.error(f"Starting time happens after stopping time ({start.date} > {stop.date})")
+        logger.error(
+            f"Starting time happens after stopping time ({start.date} > {stop.date})"
+        )
         return 1
 
     lowkals_new = get_lowkals_new(opt, start, stop, date_telem_last)

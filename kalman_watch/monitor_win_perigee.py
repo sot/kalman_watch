@@ -65,7 +65,7 @@ def get_opt() -> argparse.ArgumentParser:
         "--data-dir",
         type=Path,
         default=paths.data_dir(),
-        help=f"Data directory (default={paths.data_dir()})"
+        help=f"Data directory (default={paths.data_dir()})",
     )
     parser.add_argument(
         "--ir-thresholds-start",
@@ -154,7 +154,11 @@ def short_date(date: str):
 
 
 def plot_mon_win_and_aokalstr_composite_plotly(
-    kalman_drops_npnt_list, kalman_drops_nman_list, kalman_drops_prediction_list, outfile=None, title=""
+    kalman_drops_npnt_list,
+    kalman_drops_nman_list,
+    kalman_drops_prediction_list,
+    outfile=None,
+    title="",
 ):
     """Plot the monitor window (NMAN) and NPNT IR flags fraction data.
 
@@ -186,10 +190,22 @@ def plot_mon_win_and_aokalstr_composite_plotly(
     tables = []
     if len(kalman_drops_nman_list) > 0:
         # this happens at times before the monitoring windows were implemented
-        nman_table = vstack([table_from_perigee(kalman_drops) for kalman_drops in kalman_drops_nman_list if len(kalman_drops.times) > 0])
+        nman_table = vstack(
+            [
+                table_from_perigee(kalman_drops)
+                for kalman_drops in kalman_drops_nman_list
+                if len(kalman_drops.times) > 0
+            ]
+        )
         nman_table["type"] = 0
         tables.append(nman_table)
-    npnt_table = vstack([table_from_perigee(kalman_drops) for kalman_drops in kalman_drops_npnt_list if len(kalman_drops.times) > 0])
+    npnt_table = vstack(
+        [
+            table_from_perigee(kalman_drops)
+            for kalman_drops in kalman_drops_npnt_list
+            if len(kalman_drops.times) > 0
+        ]
+    )
     npnt_table["type"] = 1
     tables.append(npnt_table)
     table = vstack(tables)
@@ -223,9 +239,13 @@ def plot_mon_win_and_aokalstr_composite_plotly(
     for idx, pred_win_kalman_drops in enumerate(kalman_drops_prediction_list):
         perigee_date = pred_win_kalman_drops.perigee_date
         if perigee_date not in perigee_dates:
-            logger.info(f"Skipping prediction for {perigee_date} because there is no observed data")
+            logger.info(
+                f"Skipping prediction for {perigee_date} because there is no observed data"
+            )
             continue
-        color, marker = get_color_marker_for_perigee_plotly(pred_win_kalman_drops.perigee_date.date)
+        color, marker = get_color_marker_for_perigee_plotly(
+            pred_win_kalman_drops.perigee_date.date
+        )
         if len(pred_win_kalman_drops.times) > 0:
             plotly_traces.append(f"pred-{perigee_date}")
             fig.add_trace(
@@ -267,8 +287,8 @@ def plot_mon_win_and_aokalstr_composite_plotly(
         autosize=False,
         width=1100,
         height=500,
-        xaxis = {
-            "tickmode": 'linear',
+        xaxis={
+            "tickmode": "linear",
             "tick0": -100,
             "dtick": 10,
         },
@@ -278,8 +298,8 @@ def plot_mon_win_and_aokalstr_composite_plotly(
     )
 
     fig.update_layout(
-        legend= {
-            "x": 0.,
+        legend={
+            "x": 0.0,
             "y": -0.2,
             "yanchor": "top",
             "orientation": "h",
@@ -287,36 +307,40 @@ def plot_mon_win_and_aokalstr_composite_plotly(
         },
     )
 
-    predicted_traces = [idx for idx, trace in enumerate(plotly_traces) if trace.startswith("pred-")]
+    predicted_traces = [
+        idx for idx, trace in enumerate(plotly_traces) if trace.startswith("pred-")
+    ]
 
     fig.update_layout(
         updatemenus=[
             dict(
-                type = "buttons",
-                direction = "left",
+                type="buttons",
+                direction="left",
                 active=0 if show_model_on_start else 1,
-                buttons=list([
-                    dict(
-                        args2=[
-                            {"visible": [False] * len(predicted_traces)},
-                            {},
-                            predicted_traces,
-                        ],
-                        args=[
-                            {"visible": [True] * len(predicted_traces)},
-                            {},
-                            predicted_traces,
-                        ],
-                        label="Show Rad Model",
-                        method="update"
-                    )
-                ]),
+                buttons=list(
+                    [
+                        dict(
+                            args2=[
+                                {"visible": [False] * len(predicted_traces)},
+                                {},
+                                predicted_traces,
+                            ],
+                            args=[
+                                {"visible": [True] * len(predicted_traces)},
+                                {},
+                                predicted_traces,
+                            ],
+                            label="Show Rad Model",
+                            method="update",
+                        )
+                    ]
+                ),
                 pad={"r": 0, "t": 0},
                 showactive=True,
                 x=0.02,
                 xanchor="left",
                 y=0.96,
-                yanchor="top"
+                yanchor="top",
             ),
         ]
     )
@@ -390,7 +414,7 @@ def main(args=None):
         kalman_drops_nman_list,
         kalman_drops_prediction_list,
         outfile=outfile,
-        title=title
+        title=title,
     )
 
     clean_aca_images_cache(opt.n_cache, opt.data_dir)

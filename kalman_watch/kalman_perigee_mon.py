@@ -80,13 +80,13 @@ def get_opt() -> argparse.ArgumentParser:
         "--data-dir",
         type=Path,
         default=paths.data_dir(),
-        help=f"Data directory (default={paths.data_dir()})"
+        help=f"Data directory (default={paths.data_dir()})",
     )
     parser.add_argument(
         "--rad-data",
         type=Path,
         default=paths.rad_table_path(),
-        help=f"Radiation data from STK (default={paths.rad_table_path()})"
+        help=f"Radiation data from STK (default={paths.rad_table_path()})",
     )
     parser.add_argument(
         "--email",
@@ -152,7 +152,9 @@ def main(sys_args=None):
         ):
             if stat["perigee"] < start.date:
                 break
-            evt_tmp = EventPerigeeMon(stat["rad_entry"], stat["perigee"], stat["rad_exit"])
+            evt_tmp = EventPerigeeMon(
+                stat["rad_entry"], stat["perigee"], stat["rad_exit"]
+            )
             evt = EventPerigeeMon.from_npz(evt_tmp.data_path)
             evt.prev_date = date_prev
             evt.next_date = date_next
@@ -355,7 +357,7 @@ class EventPerigeeMon(EventPerigee):
                 line={"color": "black"},
             ),
             row=4,
-            col=1
+            col=1,
         )
         fig.add_trace(
             pgo.Scatter(
@@ -366,7 +368,7 @@ class EventPerigeeMon(EventPerigee):
                 marker={"color": px.colors.qualitative.Plotly[0], "size": 5},
             ),
             row=4,
-            col=1
+            col=1,
         )
         fig.add_trace(
             pgo.Scatter(
@@ -377,7 +379,7 @@ class EventPerigeeMon(EventPerigee):
                 marker={"color": px.colors.qualitative.Plotly[1], "size": 5},
             ),
             row=4,
-            col=1
+            col=1,
         )
 
         # fig.update(layout=layout, row=2, col=1)
@@ -478,7 +480,7 @@ class EventPerigeeMon(EventPerigee):
         )
 
         return trace
-    
+
 
 if __name__ == "__main__":
     import os

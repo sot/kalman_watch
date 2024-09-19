@@ -467,11 +467,13 @@ class EventPerigee:
                 "values": np.array([]),
             }
 
-        nman_table = vstack([
-            table_from_perigee(kalman_drops)
-            for kalman_drops in kalman_drops_nman_list
-            if len(kalman_drops.times) > 0
-        ])
+        nman_table = vstack(
+            [
+                table_from_perigee(kalman_drops)
+                for kalman_drops in kalman_drops_nman_list
+                if len(kalman_drops.times) > 0
+            ]
+        )
         nman_table.sort("cxcsec")
 
         result = {
@@ -488,7 +490,6 @@ class EventPerigee:
         return self._kalman_drops_npnt
 
     def _get_kalman_drops_npnt(self):
-
         if self.tlm is None or len(self.data["times"]) <= 200:
             return {
                 "times": np.array([]),
@@ -513,7 +514,9 @@ class EventPerigee:
         # result of a linear fit of kalman_drops vs proton_26_300_MeV
         a, b = 0.00954, 1.747e-09
         rad_table = get_rad_table()
-        sel = (rad_table["time"] >= self.rad_entry) & (rad_table["time"] <= self.rad_exit)
+        sel = (rad_table["time"] >= self.rad_entry) & (
+            rad_table["time"] <= self.rad_exit
+        )
         predicted_kalman_drops = {
             "times": (rad_table["time"][sel] - self.perigee).sec,
             "values": a + rad_table["proton_26_300_MeV"][sel] * b,
@@ -546,6 +549,7 @@ class KalmanDropsData:
     times: np.ndarray
     kalman_drops: np.ndarray
     perigee_date: str
+
 
 # Typing hint for a table of images coming from chandra_aca.maude_decom.get_aca_images()
 ACAImagesTable: TypeAlias = Table
@@ -615,7 +619,6 @@ def get_manvrs_perigee(start: CxoTimeLike, stop: CxoTimeLike) -> Table:
 
     manvrs_perigee = vstack(manvrs_perigee)
     return manvrs_perigee
-
 
 
 def get_aca_images_cached(
@@ -1078,13 +1081,15 @@ def get_kalman_drops_nman(start, stop) -> list[KalmanDropsData]:
     kalman_drops_nman_list = []
     for mon in mons:
         dt_mins, kalman_drops_lst = get_kalman_drops_per_minute(mon)
-        kalman_drops_nman_list.append(KalmanDropsData(
-            start=mon["start"],
-            stop=mon["stop"],
-            times=np.array(dt_mins) * 60,
-            kalman_drops=kalman_drops_lst,
-            perigee_date=mon["perigee_date"].date,
-        ))
+        kalman_drops_nman_list.append(
+            KalmanDropsData(
+                start=mon["start"],
+                stop=mon["stop"],
+                times=np.array(dt_mins) * 60,
+                kalman_drops=kalman_drops_lst,
+                perigee_date=mon["perigee_date"].date,
+            )
+        )
     return kalman_drops_nman_list
 
 
@@ -1202,4 +1207,3 @@ def _reshape_to_n_sample_2d(arr: np.ndarray, n_sample: int = 60) -> np.ndarray:
     arr = arr[: -(arr.size % n_sample)]
     arr = arr.reshape(-1, n_sample)
     return arr
-
