@@ -6,12 +6,11 @@ from pathlib import Path
 
 
 class Config:
-
     # Top-level data directory
     data_dir = "."
 
     # FITS file containing radiation data from STK
-    rad_table_path=str(
+    rad_table_path = str(
         Path(os.environ["SKA"])
         / "data"
         / "stk_radiation"
