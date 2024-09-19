@@ -20,6 +20,7 @@ import argparse
 
 import re
 from pathlib import Path
+from typing import Any
 
 import plotly.express as px
 import plotly.graph_objects as go
@@ -46,11 +47,6 @@ from kalman_watch.kalman_watch_data import (
 
 
 logger = basic_logger(__name__, level="INFO")
-
-
-
-# Keep track of labels used in the plot so that we don't repeat them
-LABELS_USED = {}  # date: label
 
 
 def get_opt() -> argparse.ArgumentParser:
@@ -106,7 +102,7 @@ def get_opt() -> argparse.ArgumentParser:
     return parser
 
 
-PERIGEE_COLOR_MARKERS_PLOTLY = {}
+PERIGEE_COLOR_MARKERS_PLOTLY: dict[str, tuple[Any, str]] = {}
 
 
 def get_color_marker_for_perigee_plotly(perigee_date: str) -> tuple[str, str]:

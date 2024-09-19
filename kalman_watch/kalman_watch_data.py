@@ -6,7 +6,7 @@ import functools
 import json
 import re
 from pathlib import Path
-from typing import List, Union
+from typing import List, Union, Any
 
 import astropy.units as u
 import numpy as np
@@ -623,7 +623,7 @@ class KalmanDropsData:
 
 # Typing hint for a table of images coming from chandra_aca.maude_decom.get_aca_images()
 ACAImagesTable: TypeAlias = Table
-MonDataSet: TypeAlias = dict[str]  # TODO: use dataclass
+MonDataSet: TypeAlias = dict[str, Any]  # TODO: use dataclass
 
 
 def get_manvrs_perigee(start: CxoTimeLike, stop: CxoTimeLike) -> Table:
@@ -1129,13 +1129,13 @@ def get_kalman_drops_nman(mon: MonDataSet) -> KalmanDropsData:
     -------
     kalman_drops_data : KalmanDropsData
     """
-    dt_mins, kalman_drops = get_kalman_drops_per_minute(mon)
+    dt_mins, kalman_drops_lst = get_kalman_drops_per_minute(mon)
     times = np.array(dt_mins) * 60
     kalman_drops = KalmanDropsData(
         start=mon["start"],
         stop=mon["stop"],
         times=times,
-        kalman_drops=kalman_drops,
+        kalman_drops=kalman_drops_lst,
         perigee_date=mon["perigee_date"].date,
     )
     return kalman_drops
