@@ -8,8 +8,12 @@ def data_dir() -> Path:
 
 
 def perigees_dir_path() -> Path:
-    return data_dir() / conf.perigee_dir_basename
+    return data_dir() / "perigees"
 
 
 def perigees_index_table_path() -> Path:
-    return perigees_dir_path() / conf.perigee_index_basename
+    return perigees_dir_path() / "kalman_perigees.ecsv"
+
+
+def rad_table_path() -> Path:
+    return Path(conf.rad_table_path)

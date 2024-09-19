@@ -244,11 +244,11 @@ class EventPerigee:
 
     @property
     def data_path(self):
-        return self.dir_path / conf.perigee_event_basename
+        return self.dir_path / "data.npz"
 
     @property
     def info_path(self):
-        return self.dir_path / conf.perigee_info_basename
+        return self.dir_path / "info.json"
 
     @property
     def obss(self):
