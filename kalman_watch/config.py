@@ -13,8 +13,8 @@ class Config:
     rad_table_path = (
         Path(os.environ["SKA"])
         / "data"
-        / "stk_radiation"
-        / "rad_data_2022:003:12:00:00.000-2025:365:11:59:59.000.fits"
+        / "stk"
+        / "radiation_data.fits"
     )
 
     # Start date to be used in determining IR thresholds
