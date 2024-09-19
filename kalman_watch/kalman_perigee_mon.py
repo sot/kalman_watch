@@ -347,11 +347,10 @@ class EventPerigeeMon(EventPerigee):
             row=4,
             col=1
         )
-        kalman_drops_nman = self.get_kalman_drops_nman()
         fig.add_trace(
             pgo.Scatter(
-                x=kalman_drops_nman["times"],
-                y=kalman_drops_nman["values"],
+                x=self.kalman_drops_nman["times"],
+                y=self.kalman_drops_nman["values"],
                 name="NMAN",
                 mode="markers",
                 marker={"color": px.colors.qualitative.Plotly[0], "size": 5},
@@ -359,11 +358,10 @@ class EventPerigeeMon(EventPerigee):
             row=4,
             col=1
         )
-        kalman_drops_npnt = self.get_kalman_drops_npnt()
         fig.add_trace(
             pgo.Scatter(
-                x=kalman_drops_npnt["times"],
-                y=kalman_drops_npnt["values"],
+                x=self.kalman_drops_npnt["times"],
+                y=self.kalman_drops_npnt["values"],
                 name="NPNT",
                 mode="markers",
                 marker={"color": px.colors.qualitative.Plotly[1], "size": 5},

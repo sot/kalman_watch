@@ -35,9 +35,6 @@ from ska_helpers.logging import basic_logger
 
 from kalman_watch import __version__, conf
 from kalman_watch.kalman_watch_data import (
-    NotEnoughImagesError,
-    get_manvrs_perigee,
-    get_mon_dataset,
     get_kalman_drops_nman,
     get_kalman_drops_npnt,
     get_kalman_drops_prediction,
@@ -85,9 +82,9 @@ def get_opt() -> argparse.ArgumentParser:
     parser.add_argument(
         "--n-cache",
         type=int,
-        default=70,
+        default=conf.n_cache,
         help=(
-            "Number of cached ACA images files (~0.7 Mb each) to keep (default=70)"
+            f"Number of cached ACA images files (~0.7 Mb each) to keep (default={conf.n_cache})"
             " (set to 0 to disable caching)"
         ),
     )
@@ -363,39 +360,17 @@ def main(args=None):
     start = cxotime_reldate(opt.start)
     stop = cxotime_reldate(opt.stop)
 
+    conf.n_cache = opt.n_cache
     conf.data_dir = opt.data_dir
     conf.ir_thresholds_start = opt.ir_thresholds_start
     conf.ir_thresholds_stop = opt.ir_thresholds_stop
     if opt.rad_data is not None:
         conf.rad_table_path = opt.rad_data
 
-    # Intervals of NMAN within 100 minutes of perigee
-    manvrs_perigee = [] if opt.skip_mon else get_manvrs_perigee(start, stop)
+    # Process monitor window (NMAN) data in the entire time range into kalman drops per minute.
+    kalman_drops_nman_list = [] if opt.skip_mon else get_kalman_drops_nman(start, stop)
 
-    # Get list of monitor window data for each perigee maneuver
-    mons = []
-    for manvr in manvrs_perigee:
-        try:
-            mon = get_mon_dataset(
-                manvr["datestart"],
-                manvr["datestop"],
-                opt.ir_thresholds_start,
-                opt.ir_thresholds_stop,
-                opt.data_dir,
-                cache=opt.n_cache > 0,
-            )
-            mons.append(mon)
-        except NotEnoughImagesError as err:
-            logger.warning(err)
-
-    # Process monitor window (NMAN) data into kalman drops per minute for each maneuver.
-    # This uses idx to assign a different color to each maneuver (in practice each
-    # perigee).
-    logger.info("processing NMAN data")
-    kalman_drops_nman_list = [get_kalman_drops_nman(mon) for mon in mons]
-
-    # Process NPNT data for the entire time range into kalman drops per minute. This
-    # assigns different colors to each perigee.
+    # Process NPNT data for the entire time range into kalman drops per minute.
     kalman_drops_npnt_list = get_kalman_drops_npnt(start, stop)
 
     kalman_drops_prediction_list = get_kalman_drops_prediction(start, stop)

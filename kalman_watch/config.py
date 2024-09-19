@@ -23,5 +23,8 @@ class Config:
     # Stop date to be used in determining IR thresholds
     ir_thresholds_stop = "2023:200"
 
+    # Number of cached ACA images files (~0.7 Mb each) to keep
+    n_cache = 70
+
 
 conf = Config()
