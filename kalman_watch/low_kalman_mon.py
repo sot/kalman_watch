@@ -18,7 +18,7 @@ from Ska.engarchive import fetch
 from Ska.engarchive.utils import logical_intervals
 from ska_helpers.logging import basic_logger
 
-from . import __version__
+from kalman_watch import __version__, paths
 
 # Constants and file path definitions
 FILE_DIR = Path(__file__).parent
@@ -56,7 +56,12 @@ def get_opt():
         default=14,
         help="Lookback days from stop for processing (days, default=14)",
     )
-    parser.add_argument("--data-dir", type=str, default=".", help="Data directory")
+    parser.add_argument(
+        "--data-dir",
+        type=Path,
+        default=paths.data_dir(),
+        help=f"Data directory (default={paths.data_dir()})",
+    )
     parser.add_argument(
         "--long-duration",
         type=float,
@@ -75,6 +80,11 @@ def get_opt():
         default=30.0,
         help="Number of days to highlight in plots and table (days, default=30)",
     )
+    parser.add_argument(
+        "--in-file",
+        default="mon_win_kalman_drops_-45d_-1d.html",
+        help="Input file with monitor-window data. Default: mon_win_kalman_drops_-45d_-1d.html",
+    )
     return parser
 
 
@@ -90,7 +100,14 @@ def main(sys_args=None):
     start = stop - opt.lookback * u.day  # type: CxoTime
     date_telem_last = CxoTime(lowkals_prev.meta.pop("date_telem_last", "1999:001"))
     if start < date_telem_last:
+        logger.info("Overriding starting time with the time of latest low-kalman event")
         start = date_telem_last
+
+    if stop <= start:
+        logger.error(
+            f"Starting time happens after stopping time ({start.date} > {stop.date})"
+        )
+        return 1
 
     lowkals_new = get_lowkals_new(opt, start, stop, date_telem_last)
     lowkals = vstack([lowkals_new, lowkals_prev])  # type: Table
@@ -117,11 +134,12 @@ def get_lowkals_new(
     # Get the AOKALSTR data with number of kalman stars reported by OBC.
     logger.info(f"Getting telemetry between {start} and {stop}")
 
+    print(start, stop)
     dat = fetch.Msidset(["aokalstr", "aoacaseq", "aopcadmd", "cobsrqid"], start, stop)
     dat.interpolate(1.025)
 
     if len(dat.times) < 300:
-        logger.warning(f"WARNING: Not enough data to find low Kalman intervals")
+        logger.warning("WARNING: Not enough data to find low Kalman intervals")
         lowkals = LOWKALS_EMPTY.copy()
         lowkals.meta["date_telem_last"] = date_telem_last.date
         return lowkals
@@ -199,11 +217,11 @@ def get_plot_html(opt, lowkals: Table, show=False) -> str:
         {
             "xaxis_autorange": False,
             "title": (
-                f"Duration of contiguous n_kalman <= 1 (autoscale for full mission)"
+                "Duration of contiguous n_kalman <= 1 (autoscale for full mission)"
             ),
             "yaxis": {"title": "Duration (sec)", "autorange": False, "range": [0, 35]},
             "xaxis": {
-                "title": f"Date",
+                "title": "Date",
                 "range": [
                     (CxoTime.now() - 5 * 365 * u.day).datetime,
                     CxoTime.now().datetime,
@@ -241,7 +259,7 @@ def make_web_page(opt, lowkals: Table) -> None:
         tr_classes.append(tr_class)
     long_durs["tr_class"] = tr_classes
 
-    with open(Path(opt.data_dir) / "kalman_plot.html") as f:
+    with open(Path(opt.data_dir) / opt.in_file) as f:
         kalman_plot_html = f.read()
 
     index_template_html = INDEX_TEMPLATE_PATH().read_text()
