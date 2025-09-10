@@ -892,9 +892,9 @@ def get_mon_dataset(
     Parameters
     ----------
     start : CxoTimeLike
-        Start time
+        Start time (typically for a particular maneuver within perigee)
     stop : CxoTimeLike
-        Stop time
+        Stop time (typically for a particular maneuver within perigee)
     ir_thresholds_start : CxoTimeLike
         Start time for sampling guide stars for IR thresholds
     ir_thresholds_stop : CxoTimeLike
@@ -1049,14 +1049,14 @@ def get_kalman_drops_nman(start, stop) -> list[KalmanDropsData]:
 
     Parameters
     ----------
-    mon : MonDataSet
-        Dataset of MON data from get_mon_dataset()
-    idx : int
-        Index of this perigee (used to assign a color)
+    start : CxoTimeLike
+        Start time (typically for a particular maneuver within perigee)
+    stop : CxoTimeLike
+        Stop time (typically for a particular maneuver within perigee)
 
     Returns
     -------
-    kalman_drops_data : KalmanDropsData
+    kalman_drops_data : list[KalmanDropsData]
     """
     manvrs_perigee = get_manvrs_perigee(start, stop)
 
@@ -1081,6 +1081,16 @@ def get_kalman_drops_nman(start, stop) -> list[KalmanDropsData]:
     kalman_drops_nman_list = []
     for mon in mons:
         dt_mins, kalman_drops_lst = get_kalman_drops_per_minute(mon)
+        if len(dt_mins) < 5:
+            # Require at least 5 "minutes" of data to be useful. This processing
+            # includes each maneuver in perigee that intersects with the -100 to +100
+            # minute interval around perigee. However the monitor window data does not
+            # cover the entire maneuver interval, so we may end up with no monitor
+            # window data or not enough data to be useful. The previous behavior of not
+            # applying this conditional resulted in crashes for a maneuver starting
+            # around 2025:243:09:24:54.511.
+            continue
+
         kalman_drops_nman_list.append(
             KalmanDropsData(
                 start=mon["start"],
