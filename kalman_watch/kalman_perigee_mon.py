@@ -20,10 +20,10 @@ from ska_helpers.run_info import log_run_info
 
 from kalman_watch import __version__, conf, paths
 from kalman_watch.kalman_watch_data import (
-    get_dirname,
     EventPerigee,
-    get_stats,
+    get_dirname,
     get_evts_perigee,
+    get_stats,
     read_kalman_stats,
 )
 
