@@ -1089,6 +1089,9 @@ def get_kalman_drops_nman(start, stop) -> list[KalmanDropsData]:
             # window data or not enough data to be useful. The previous behavior of not
             # applying this conditional resulted in crashes for a maneuver starting
             # around 2025:243:09:24:54.511.
+            LOGGER.info(
+                f"Skipping NMAN from {mon['start']} to {mon['stop']} due to "
+                "insufficient monitor window data within 100 minutes of perigee")
             continue
 
         kalman_drops_nman_list.append(
