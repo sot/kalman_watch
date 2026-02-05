@@ -182,7 +182,7 @@ def plot_mon_win_and_aokalstr_composite_plotly(
     if outfile is None:
         outfile = "kalman_plot.html"
 
-    fig = go.FigureWidget()
+    fig = go.Figure()
 
     if not title:
         title = f"IR flag fraction near perigee {kalman_drops_npnt_list.start.iso[:7]}"
