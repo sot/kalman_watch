@@ -53,6 +53,17 @@ KALMAN_LIMITS = [
 ]
 
 
+# Custom JSON encoder to handle numpy types
+class InfoEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+        elif isinstance(obj, (np.integer, np.floating)):
+            return obj.item()
+        else:
+            return super().default(obj)
+
+
 def get_dirname(date: Union[CxoTime, None]) -> str:
     if date is None:
         out = ""
@@ -368,7 +379,7 @@ class EventPerigee:
         """Write info to file"""
         path = self.info_path
         LOGGER.info(f"Writing info to {path}")
-        path.write_text(json.dumps(self.info, indent=4))
+        path.write_text(json.dumps(self.info, indent=4, cls=InfoEncoder))
 
     def write_data(self):
         # Compressed version of data
